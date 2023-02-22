@@ -27,7 +27,7 @@ impl EventHandler for Handler {
                     return ();
                 }
                 let index = msg.content.find(">").unwrap_or(0);
-                if index == msg.content.len() - 2 {
+                if index > msg.content.len() - 2 {
                     return ()
                 }
 
