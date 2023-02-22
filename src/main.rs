@@ -27,11 +27,11 @@ impl EventHandler for Handler {
                     return ();
                 }
                 let index = msg.content.find(">").unwrap_or(0);
-                if index == msg.content.len() - 1{
+                if index == msg.content.len() - 2 {
                     return ()
                 }
 
-                let real_content = &msg.content[index+1..];
+                let real_content = &msg.content[index+2..];
                 if real_content == "!ping" {
                     if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
                         println!("Error sending message: {:?}", why);
