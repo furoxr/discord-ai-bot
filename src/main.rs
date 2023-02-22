@@ -26,10 +26,12 @@ impl EventHandler for Handler {
                 if !msg.content.starts_with(&mention_part) {
                     return ();
                 }
-                let content = msg.content.clone();
-                let index = content.find(">").unwrap_or(0);
-                let real_content = &content[index..];
+                let index = msg.content.find(">").unwrap_or(0);
+                if index == msg.content.len() - 1{
+                    return ()
+                }
 
+                let real_content = &msg.content[index+1..];
                 if real_content == "!ping" {
                     if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
                         println!("Error sending message: {:?}", why);
