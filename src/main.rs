@@ -1,11 +1,15 @@
 use std::env;
 
+use async_openai::Client as OpenAIClient;
+use async_openai::types::CreateCompletionRequestArgs;
 use serenity::async_trait;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 
-struct Handler;
+struct Handler {
+    pub openai_client: OpenAIClient,
+}
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -32,6 +36,23 @@ impl EventHandler for Handler {
                 }
 
                 let real_content = &msg.content[index+2..];
+
+                let request = CreateCompletionRequestArgs::default()
+                    .model("text-davinci-003")
+                    .prompt(real_content)
+                    .max_tokens(3500_u16)
+                    .n(1)
+                    .build().unwrap();
+        
+                let response = self.openai_client.completions().create(request).await.unwrap();
+            
+                for choice in response.choices {
+                    println!("{}", &choice.text);
+                    if let Err(why) = msg.channel_id.say(&ctx.http, choice.text).await {
+                        println!("Error sending message: {:?}", why);
+                    }
+                }
+                
                 if real_content == "!ping" {
                     if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
                         println!("Error sending message: {:?}", why);
@@ -69,8 +90,9 @@ async fn main() {
     // Create a new instance of the Client, logging in as a bot. This will
     // automatically prepend your bot token with "Bot ", which is a requirement
     // by Discord for bot users.
+    let openai_client = OpenAIClient::new();
     let mut client =
-        Client::builder(&token, intents).event_handler(Handler).await.expect("Err creating client");
+        Client::builder(&token, intents).event_handler(Handler {openai_client}).await.expect("Err creating client");
 
     // Finally, start a single shard, and start listening to events.
     //
