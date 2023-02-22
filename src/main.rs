@@ -21,7 +21,16 @@ impl EventHandler for Handler {
             },
             Ok(true) => {
                 println!("Mentioned by {:?}, Content: {:?}", &msg.author, &msg.content);
-                if msg.content == "!ping" {
+
+                let mention_part = String::from("<@") + &ctx.cache.current_user_id().0.to_string() + ">";
+                if !msg.content.starts_with(&mention_part) {
+                    return ();
+                }
+                let content = msg.content.clone();
+                let index = content.find(">").unwrap_or(0);
+                let real_content = &content[index..];
+
+                if real_content == "!ping" {
                     if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
                         println!("Error sending message: {:?}", why);
                     }
