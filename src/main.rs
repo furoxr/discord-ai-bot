@@ -53,7 +53,7 @@ impl EventHandler for Handler {
                     Err(why) => {
                         println!("Error in openai completion: {:?}", why);
                         return ();
-                    },
+                    }
                     Ok(x) => x,
                 };
 
@@ -100,15 +100,27 @@ async fn main() {
     // automatically prepend your bot token with "Bot ", which is a requirement
     // by Discord for bot users.
     let openai_client = OpenAIClient::new();
-    let request = CreateCompletionRequestArgs::default()
+    let request = match CreateCompletionRequestArgs::default()
         .model("text-davinci-003")
         .prompt("Who are you?")
         .max_tokens(3500_u16)
         .n(1)
         .build()
-        .unwrap();
+    {
+        Err(why) => {
+            println!("Error in openai completion: {:?}", why);
+            return ();
+        }
+        Ok(req) => req,
+    };
 
-    let response = openai_client.completions().create(request).await.unwrap();
+    let response = match openai_client.completions().create(request).await {
+        Err(why) => {
+            println!("Error in openai completion: {:?}", why);
+            return ();
+        }
+        Ok(x) => x,
+    };
 
     for choice in response.choices {
         println!("{}", &choice.text);
