@@ -1,24 +1,94 @@
+name: Release
+
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - "*v*"
+
+env:
+  OPENSSL_DIR: /home/runner/openssl
+  OPENSSL_STATIC: 1
+  RUST_TOOLCHAIN: nightly
 
 jobs:
-  release:
-    name: release ${{ matrix.target }}
+  build-linux:
+    name: Build package [linux]
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            archive: tar.gz
+    container:
+      image: ubuntu:20.04
     steps:
-      - uses: actions/checkout@master
-      - name: Compile and release
-        uses: rust-build/rust-build.action@v1.4.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v2
+
+      - name: Install dependencies
+        run: |
+          apt update -y
+          apt install --no-install-recommends -y \
+            git curl ca-certificates \
+            make gcc g++ clang-4.0 \
+            libssl-dev pkg-config zip
+      - name: Build openssl
+        run: |
+          curl https://www.openssl.org/source/openssl-1.1.1l.tar.gz | tar xz
+          cd openssl-1.1.1l
+          ./config --prefix=${{ env.OPENSSL_DIR }} -static -fPIC
+          make -j4
+          make install
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
         with:
-          RUSTTARGET: ${{ matrix.target }}
-          ARCHIVE_TYPES: ${{ matrix.archive }}
-          TOOLCHAIN_VERSION: 1.65
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Build discord-ai-bot
+        run: |
+          cargo build --release --target x86_64-unknown-linux-gnu
+      - name: Collect shared
+        run: |
+          mkdir -p shared
+          zip -jr \
+            shared/discord-ai-bot-linux-x86_64.zip \
+            target/x86_64-unknown-linux-gnu/release/discord-ai-bot
+
+      - name: Upload shared
+        uses: actions/upload-artifact@v2
+        with:
+          name: artifact
+          path: shared
+
+  complete-build:
+    name: Complete build
+    runs-on: ubuntu-latest
+    needs: [ build-linux ]
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions/download-artifact@v2
+        with:
+          name: artifact
+          path: shared
+
+      - name: Hash file
+        run: |
+          (cd shared && sha256sum * | tee sha256sums.txt)
+      - uses: olegtarasov/get-tag@v2.1
+        id: tag-name
+      - uses: benjlevesque/short-sha@v1.2
+        id: short-sha
+        with:
+          length: 7
+
+      - name: Publish github release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            shared/*
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  clean-artifacts:
+    name: Clean artifacts
+    runs-on: ubuntu-latest
+    needs: [ complete-build ]
+    if: always()
+    steps:
+      - uses: geekyeggo/delete-artifact@v1
+        with:
+          name: bridger-artifact
