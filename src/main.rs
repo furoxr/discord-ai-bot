@@ -1,7 +1,7 @@
 use std::env;
 
-use async_openai::Client as OpenAIClient;
 use async_openai::types::CreateCompletionRequestArgs;
+use async_openai::Client as OpenAIClient;
 use serenity::async_trait;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
@@ -22,49 +22,58 @@ impl EventHandler for Handler {
         match msg.mentions_me(&ctx).await {
             Err(why) => {
                 println!("Error check mentions_me: {:?}", why);
-            },
+            }
             Ok(true) => {
-                println!("Mentioned by {:?}, Content: {:?}", &msg.author, &msg.content);
+                println!(
+                    "Mentioned by {:?}, Content: {:?}",
+                    &msg.author, &msg.content
+                );
 
-                let mention_part = String::from("<@") + &ctx.cache.current_user_id().0.to_string() + ">";
+                let mention_part =
+                    String::from("<@") + &ctx.cache.current_user_id().0.to_string() + ">";
                 if !msg.content.starts_with(&mention_part) {
                     return ();
                 }
                 let index = msg.content.find(">").unwrap_or(0);
                 if index + 1 > msg.content.len() - 2 {
-                    return ()
+                    return ();
                 }
 
-                let real_content = &msg.content[index+2..];
+                let real_content = &msg.content[index + 2..];
 
                 let request = CreateCompletionRequestArgs::default()
                     .model("text-davinci-003")
                     .prompt(real_content)
                     .max_tokens(3500_u16)
                     .n(1)
-                    .build().unwrap();
-        
-                let response = self.openai_client.completions().create(request).await.unwrap();
-            
+                    .build()
+                    .expect("Failed to build request!");
+
+                let response = match self.openai_client.completions().create(request).await {
+                    Err(why) => {
+                        println!("Error in openai completion: {:?}", why);
+                        return ();
+                    },
+                    Ok(x) => x,
+                };
+
                 for choice in response.choices {
                     println!("{}", &choice.text);
                     if let Err(why) = msg.channel_id.say(&ctx.http, choice.text).await {
                         println!("Error sending message: {:?}", why);
                     }
                 }
-                
+
                 if real_content == "!ping" {
                     if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
                         println!("Error sending message: {:?}", why);
                     }
                 }
-
-            },
+            }
             Ok(false) => {
                 println!("Content: {:?}", &msg.content);
-            },
+            }
         }
-
     }
 
     // Set a handler to be called on the `ready` event. This is called when a
@@ -91,8 +100,24 @@ async fn main() {
     // automatically prepend your bot token with "Bot ", which is a requirement
     // by Discord for bot users.
     let openai_client = OpenAIClient::new();
-    let mut client =
-        Client::builder(&token, intents).event_handler(Handler {openai_client}).await.expect("Err creating client");
+    let request = CreateCompletionRequestArgs::default()
+        .model("text-davinci-003")
+        .prompt("Who are you?")
+        .max_tokens(3500_u16)
+        .n(1)
+        .build()
+        .unwrap();
+
+    let response = openai_client.completions().create(request).await.unwrap();
+
+    for choice in response.choices {
+        println!("{}", &choice.text);
+    }
+
+    let mut client = Client::builder(&token, intents)
+        .event_handler(Handler { openai_client })
+        .await
+        .expect("Err creating client");
 
     // Finally, start a single shard, and start listening to events.
     //
