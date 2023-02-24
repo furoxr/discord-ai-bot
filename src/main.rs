@@ -74,7 +74,7 @@ impl EventHandler for Handler {
                 }
             }
             Ok(false) => {
-                error!("Content: {:?}", &msg.content);
+                info!("Content: {:?}", &msg.content);
             }
         }
     }
