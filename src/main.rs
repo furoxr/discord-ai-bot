@@ -1,4 +1,7 @@
 use std::env;
+use tracing::{info, error, debug, trace};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt};
 
 use async_openai::types::CreateCompletionRequestArgs;
 use async_openai::Client as OpenAIClient;
@@ -21,12 +24,12 @@ impl EventHandler for Handler {
     async fn message(&self, ctx: Context, msg: Message) {
         match msg.mentions_me(&ctx).await {
             Err(why) => {
-                println!("Error check mentions_me: {:?}", why);
+                error!("Error check mentions_me: {:?}", why);
             }
             Ok(true) => {
-                println!(
+                info!(
                     "Mentioned by {:?}, Content: {:?}",
-                    &msg.author, &msg.content
+                    &msg.author.name, &msg.content
                 );
 
                 let mention_part =
@@ -51,44 +54,55 @@ impl EventHandler for Handler {
 
                 let response = match self.openai_client.completions().create(request).await {
                     Err(why) => {
-                        println!("Error in openai completion: {:?}", why);
+                        error!("Error in openai completion: {:?}", why);
                         return ();
                     }
                     Ok(x) => x,
                 };
 
                 for choice in response.choices {
-                    println!("{}", &choice.text);
+                    trace!("{}", &choice.text);
                     if let Err(why) = msg.channel_id.say(&ctx.http, choice.text).await {
-                        println!("Error sending message: {:?}", why);
+                        error!("Error sending message: {:?}", why);
                     }
                 }
 
                 if real_content == "!ping" {
                     if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
-                        println!("Error sending message: {:?}", why);
+                        error!("Error sending message: {:?}", why);
                     }
                 }
             }
             Ok(false) => {
-                println!("Content: {:?}", &msg.content);
+                error!("Content: {:?}", &msg.content);
             }
         }
     }
 
-    // Set a handler to be called on the `ready` event. This is called when a
-    // shard is booted, and a READY payload is sent by Discord. This payload
-    // contains data like the current user's guild Ids, current user data,
-    // private channels, and more.
-    //
-    // In this case, just print what the current user's username is.
     async fn ready(&self, _: Context, ready: Ready) {
-        println!("{} is connected!", ready.user.name);
+        info!("{} is connected!", ready.user.name);
     }
+}
+
+fn init_tracing() -> WorkerGuard {
+    let file_appender = tracing_appender::rolling::hourly("./logs", "log");
+    let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
+    tracing::subscriber::set_global_default(
+        fmt::Subscriber::builder()
+            // subscriber configuration
+            .with_env_filter(EnvFilter::from_default_env())
+            .finish()
+            // add additional writers
+            .with(fmt::Layer::default().with_writer(file_writer))
+    ).expect("Unable to set global tracing subscriber");
+    debug!("Tracing initialized.");
+    guard
 }
 
 #[tokio::main]
 async fn main() {
+    let _guard = init_tracing();
+
     // Configure the client with your Discord bot token in the environment.
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
     // Set gateway intents, which decides what events the bot will be notified about
@@ -96,46 +110,13 @@ async fn main() {
         | GatewayIntents::DIRECT_MESSAGES
         | GatewayIntents::MESSAGE_CONTENT;
 
-    // Create a new instance of the Client, logging in as a bot. This will
-    // automatically prepend your bot token with "Bot ", which is a requirement
-    // by Discord for bot users.
     let openai_client = OpenAIClient::new();
-    let request = match CreateCompletionRequestArgs::default()
-        .model("text-davinci-003")
-        .prompt("Who are you?")
-        .max_tokens(3500_u16)
-        .n(1)
-        .build()
-    {
-        Err(why) => {
-            println!("Error in openai completion: {:?}", why);
-            return ();
-        }
-        Ok(req) => req,
-    };
-
-    let response = match openai_client.completions().create(request).await {
-        Err(why) => {
-            println!("Error in openai completion: {:?}", why);
-            return ();
-        }
-        Ok(x) => x,
-    };
-
-    for choice in response.choices {
-        println!("{}", &choice.text);
-    }
-
     let mut client = Client::builder(&token, intents)
         .event_handler(Handler { openai_client })
         .await
-        .expect("Err creating client");
+        .expect("Err creating discord bot client");
 
-    // Finally, start a single shard, and start listening to events.
-    //
-    // Shards will automatically attempt to reconnect, and will perform
-    // exponential backoff until it reconnects.
     if let Err(why) = client.start().await {
-        println!("Client error: {:?}", why);
+        error!("Client error: {:?}", why);
     }
 }
