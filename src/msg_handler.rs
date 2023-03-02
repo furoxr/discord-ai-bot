@@ -62,7 +62,12 @@ impl EventHandler for Handler {
 
                 for choice in response.choices {
                     trace!("{}", &choice.message.content);
-                    if let Err(why) = msg.channel_id.say(&ctx.http, choice.message.content).await {
+                    if let Err(why) = msg.channel_id.send_message(
+                        &ctx.http,
+                         |m| {
+                            m.content(choice.message.content)
+                             .reference_message(&msg)
+                        }).await {
                         error!("Error sending message: {:?}", why);
                     }
                 }
