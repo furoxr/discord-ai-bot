@@ -35,11 +35,11 @@ impl EventHandler for Handler {
                 let mention_part =
                     String::from("<@") + &ctx.cache.current_user_id().0.to_string() + ">";
                 if !msg.content.starts_with(&mention_part) {
-                    return ();
+                    return;
                 }
-                let index = msg.content.find(">").unwrap_or(0);
+                let index = msg.content.find('>').unwrap_or(0);
                 if index + 1 > msg.content.len() - 2 {
-                    return ();
+                    return;
                 }
 
                 let real_content = &msg.content[index + 2..];
@@ -55,7 +55,7 @@ impl EventHandler for Handler {
                 let response = match self.openai_client.completions().create(request).await {
                     Err(why) => {
                         error!("Error in openai completion: {:?}", why);
-                        return ();
+                        return;
                     }
                     Ok(x) => x,
                 };
