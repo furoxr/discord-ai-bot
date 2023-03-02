@@ -12,6 +12,18 @@ use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 
+macro_rules! try_log {
+    ($expr:expr) => {
+        match $expr {
+            Ok(val) => val,
+            Err(err) => {
+                error!("Error: {}", err);
+                return;
+            }
+        }
+    };
+}
+
 struct Handler {
     pub openai_client: OpenAIClient,
 }
@@ -45,30 +57,21 @@ impl EventHandler for Handler {
                 }
 
                 let real_content = &msg.content[index + 2..];
-                let request = CreateChatCompletionRequestArgs::default()
+                let request_build = CreateChatCompletionRequestArgs::default()
                     .model("gpt-3.5-turbo")
                     .messages([
-                        ChatCompletionRequestMessageArgs::default()
+                        try_log!(ChatCompletionRequestMessageArgs::default()
                             .role(Role::System)
                             .content("You are a helpful assistant.")
-                            .build()
-                            .expect(""),
-                        ChatCompletionRequestMessageArgs::default()
+                            .build()),
+                        try_log!(ChatCompletionRequestMessageArgs::default()
                             .role(Role::User)
                             .content(real_content)
-                            .build()
-                            .expect(""),
+                            .build()),
                     ])
-                    .build()
-                    .expect("Failed to build request!");
-
-                let response = match self.openai_client.chat().create(request).await {
-                    Err(why) => {
-                        error!("Error in openai completion: {:?}", why);
-                        return;
-                    }
-                    Ok(x) => x,
-                };
+                    .build();
+                let request = try_log!(request_build);
+                let response = try_log!(self.openai_client.chat().create(request).await);
 
                 for choice in response.choices {
                     trace!("{}", &choice.message.content);
