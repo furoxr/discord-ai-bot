@@ -1,9 +1,11 @@
 use std::env;
-use tracing::{info, error, debug, trace};
+use tracing::{debug, error, info, trace};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt};
+use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-use async_openai::types::CreateCompletionRequestArgs;
+use async_openai::types::{
+    ChatCompletionRequestMessageArgs, CreateChatCompletionRequestArgs, Role,
+};
 use async_openai::Client as OpenAIClient;
 use serenity::async_trait;
 use serenity::model::channel::Message;
@@ -43,16 +45,24 @@ impl EventHandler for Handler {
                 }
 
                 let real_content = &msg.content[index + 2..];
-
-                let request = CreateCompletionRequestArgs::default()
-                    .model("text-davinci-003")
-                    .prompt(real_content)
-                    .max_tokens(3500_u16)
-                    .n(1)
+                let request = CreateChatCompletionRequestArgs::default()
+                    .model("gpt-3.5-turbo")
+                    .messages([
+                        ChatCompletionRequestMessageArgs::default()
+                            .role(Role::System)
+                            .content("You are a helpful assistant.")
+                            .build()
+                            .expect(""),
+                        ChatCompletionRequestMessageArgs::default()
+                            .role(Role::User)
+                            .content(real_content)
+                            .build()
+                            .expect(""),
+                    ])
                     .build()
                     .expect("Failed to build request!");
 
-                let response = match self.openai_client.completions().create(request).await {
+                let response = match self.openai_client.chat().create(request).await {
                     Err(why) => {
                         error!("Error in openai completion: {:?}", why);
                         return;
@@ -61,8 +71,8 @@ impl EventHandler for Handler {
                 };
 
                 for choice in response.choices {
-                    trace!("{}", &choice.text);
-                    if let Err(why) = msg.channel_id.say(&ctx.http, choice.text).await {
+                    trace!("{}", &choice.message.content);
+                    if let Err(why) = msg.channel_id.say(&ctx.http, choice.message.content).await {
                         error!("Error sending message: {:?}", why);
                     }
                 }
@@ -93,8 +103,9 @@ fn init_tracing() -> WorkerGuard {
             .with_env_filter(EnvFilter::from_default_env())
             .finish()
             // add additional writers
-            .with(fmt::Layer::default().with_writer(file_writer))
-    ).expect("Unable to set global tracing subscriber");
+            .with(fmt::Layer::default().with_writer(file_writer)),
+    )
+    .expect("Unable to set global tracing subscriber");
     debug!("Tracing initialized.");
     guard
 }
