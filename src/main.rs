@@ -1,6 +1,8 @@
 pub mod helper;
 pub mod msg_handler;
+pub mod conversation;
 
+use conversation::ConversationCache;
 use msg_handler::Handler;
 
 use std::env;
@@ -40,8 +42,9 @@ async fn main() {
         | GatewayIntents::MESSAGE_CONTENT;
 
     let openai_client = OpenAIClient::new();
+    let conversation_cache = ConversationCache::default();
     let mut client = Client::builder(&token, intents)
-        .event_handler(Handler { openai_client })
+        .event_handler(Handler { openai_client, conversation_cache })
         .await
         .expect("Err creating discord bot client");
 

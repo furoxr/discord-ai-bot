@@ -1,18 +1,21 @@
-use tracing::{error, info, trace};
-
-use crate::helper::try_log;
-
 use async_openai::types::{
-    ChatCompletionRequestMessageArgs, CreateChatCompletionRequestArgs, Role,
+    ChatCompletionRequestMessage, ChatCompletionRequestMessageArgs,
+    CreateChatCompletionRequestArgs, Role,
 };
 use async_openai::Client as OpenAIClient;
-use serenity::async_trait;
-use serenity::model::channel::Message;
-use serenity::model::gateway::Ready;
-use serenity::prelude::*;
+use serenity::{
+    async_trait,
+    model::{channel::Message, gateway::Ready},
+    prelude::*,
+};
+use tracing::{error, info, trace};
+
+use crate::conversation::ConversationCache;
+use crate::helper::try_log;
 
 pub struct Handler {
     pub openai_client: OpenAIClient,
+    pub conversation_cache: ConversationCache,
 }
 
 #[async_trait]
@@ -43,33 +46,49 @@ impl EventHandler for Handler {
                     return;
                 }
 
+                let history: Vec<ChatCompletionRequestMessage> =
+                    try_log!(self.conversation_cache.get_messages(msg.author.id))
+                        .into_iter()
+                        .map(|m| m.into())
+                        .collect();
                 let real_content = &msg.content[index + 2..];
+                let mut conversations = vec![try_log!(ChatCompletionRequestMessageArgs::default()
+                    .role(Role::System)
+                    .content("You are a helpful assistant.")
+                    .build())];
+                conversations.extend(history);
+                conversations.push(try_log!(ChatCompletionRequestMessageArgs::default()
+                    .role(Role::User)
+                    .content(real_content)
+                    .build()));
                 let request_build = CreateChatCompletionRequestArgs::default()
                     .model("gpt-3.5-turbo")
-                    .messages([
-                        try_log!(ChatCompletionRequestMessageArgs::default()
-                            .role(Role::System)
-                            .content("You are a helpful assistant.")
-                            .build()),
-                        try_log!(ChatCompletionRequestMessageArgs::default()
-                            .role(Role::User)
-                            .content(real_content)
-                            .build()),
-                    ])
+                    .messages(conversations)
                     .build();
+
                 let request = try_log!(request_build);
                 let response = try_log!(self.openai_client.chat().create(request).await);
 
                 for choice in response.choices {
                     trace!("{}", &choice.message.content);
-                    if let Err(why) = msg.channel_id.send_message(
-                        &ctx.http,
-                         |m| {
-                            m.content(choice.message.content)
-                             .reference_message(&msg)
-                        }).await {
-                        error!("Error sending message: {:?}", why);
-                    }
+                    let message_sent = try_log!(
+                        msg.channel_id
+                            .send_message(&ctx.http, |m| {
+                                m.content(choice.message.content).reference_message(&msg)
+                            })
+                            .await
+                    );
+
+                    try_log!(self.conversation_cache.add_message(
+                        msg.author.id,
+                        Role::User,
+                        msg.clone()
+                    ));
+                    try_log!(self.conversation_cache.add_message(
+                        msg.author.id,
+                        Role::Assistant,
+                        message_sent.clone()
+                    ));
                 }
 
                 if real_content == "!ping" {
