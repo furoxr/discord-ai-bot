@@ -1,8 +1,10 @@
+use anyhow::Result;
 use async_openai::types::{
     ChatCompletionRequestMessage, ChatCompletionRequestMessageArgs,
     CreateChatCompletionRequestArgs, Role,
 };
 use async_openai::Client as OpenAIClient;
+use serenity::model::prelude::UserId;
 use serenity::{
     async_trait,
     model::{channel::Message, gateway::Ready},
@@ -18,6 +20,48 @@ pub struct Handler {
     pub conversation_cache: ConversationCache,
 }
 
+impl Handler {
+    fn extract_legal_content(bot_user_id: UserId, msg: &Message) -> Option<&str> {
+        let mention_part = String::from("<@") + &bot_user_id.0.to_string() + ">";
+        if !msg.content.starts_with(&mention_part) {
+            return None;
+        }
+        let index = msg.content.find('>').unwrap_or(0);
+        if index + 1 > msg.content.len() - 2 {
+            return None;
+        }
+        let real_content = &msg.content[index + 2..];
+        Some(real_content)
+    }
+
+    fn build_conversation(
+        &self,
+        question: &str,
+        user_id: UserId,
+    ) -> Result<Vec<ChatCompletionRequestMessage>> {
+        let mut conversations = vec![ChatCompletionRequestMessageArgs::default()
+            .role(Role::System)
+            .content("You are a helpful assistant.")
+            .build()?];
+
+        let history: Vec<ChatCompletionRequestMessage> = self
+            .conversation_cache
+            .get_messages(user_id)?
+            .into_iter()
+            .map(|m| m.into())
+            .collect();
+        conversations.extend(history);
+        conversations.push(
+            ChatCompletionRequestMessageArgs::default()
+                .role(Role::User)
+                .content(question)
+                .build()?,
+        );
+
+        Ok(conversations)
+    }
+}
+
 #[async_trait]
 impl EventHandler for Handler {
     // Set a handler for the `message` event - so that whenever a new message
@@ -31,7 +75,7 @@ impl EventHandler for Handler {
                 error!("Error check mentions_me: {:?}", why);
             }
             Ok(false) => {
-                info!("Content: {:?}", &msg.content);
+                trace!("Content: {:?}", &msg.content);
             }
             Ok(true) => {
                 info!(
@@ -39,40 +83,21 @@ impl EventHandler for Handler {
                     &msg.author.name, &msg.content
                 );
 
-                let mention_part =
-                    String::from("<@") + &ctx.cache.current_user_id().0.to_string() + ">";
-                if !msg.content.starts_with(&mention_part) {
-                    return;
-                }
-                let index = msg.content.find('>').unwrap_or(0);
-                if index + 1 > msg.content.len() - 2 {
-                    return;
-                }
-
-                let history: Vec<ChatCompletionRequestMessage> =
-                    try_log!(self.conversation_cache.get_messages(msg.author.id))
-                        .into_iter()
-                        .map(|m| m.into())
-                        .collect();
-                let real_content = &msg.content[index + 2..];
-                let mut conversations = vec![try_log!(ChatCompletionRequestMessageArgs::default()
-                    .role(Role::System)
-                    .content("You are a helpful assistant.")
-                    .build())];
-                conversations.extend(history);
-                conversations.push(try_log!(ChatCompletionRequestMessageArgs::default()
-                    .role(Role::User)
-                    .content(real_content)
-                    .build()));
+                let real_content =
+                    match Self::extract_legal_content(ctx.cache.current_user_id(), &msg) {
+                        Some(x) => x,
+                        None => return,
+                    };
+                let conversations = try_log!(self.build_conversation(real_content, msg.author.id));
                 let request_build = CreateChatCompletionRequestArgs::default()
                     .model("gpt-3.5-turbo")
                     .messages(conversations)
                     .build();
 
                 let request = try_log!(request_build);
-                let response = try_log!(self.openai_client.chat().create(request).await);
+                let mut response = try_log!(self.openai_client.chat().create(request).await);
 
-                for choice in response.choices {
+                if let Some(choice) = response.choices.pop() {
                     trace!("{}", &choice.message.content);
                     let message_sent = try_log!(
                         msg.channel_id
@@ -82,22 +107,14 @@ impl EventHandler for Handler {
                             .await
                     );
 
-                    try_log!(self.conversation_cache.add_message(
-                        msg.author.id,
-                        Role::User,
-                        msg.clone()
-                    ));
-                    try_log!(self.conversation_cache.add_message(
-                        msg.author.id,
-                        Role::Assistant,
-                        message_sent.clone()
-                    ));
-                }
-
-                if real_content == "!ping" {
-                    if let Err(why) = msg.channel_id.say(&ctx.http, "Pong!").await {
-                        error!("Error sending message: {:?}", why);
-                    }
+                    vec![
+                        (Role::User, msg.clone()),
+                        (Role::Assistant, message_sent),
+                    ]
+                    .into_iter()
+                    .for_each(|x| {
+                        try_log!(self.conversation_cache.add_message(msg.author.id, x.0, x.1))
+                    });
                 }
             }
         }

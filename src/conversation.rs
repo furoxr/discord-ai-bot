@@ -71,15 +71,15 @@ impl ConversationCache {
 
     pub fn get_messages(&self, user_id: UserId) -> Result<Messages, ConversationCacheError> {
         let mut map = self.map.lock()?;
-        Ok(map.get(&user_id).cloned().unwrap_or(vec![]))
+        Ok(map.get(&user_id).cloned().unwrap_or_default())
     }
 }
 
-impl Into<ChatCompletionRequestMessage> for ConversationMessage {
-    fn into(self) -> ChatCompletionRequestMessage {
+impl From<ConversationMessage> for ChatCompletionRequestMessage {
+    fn from(val: ConversationMessage) -> Self {
         ChatCompletionRequestMessageArgs::default()
-            .role(self.role)
-            .content(self.message.content)
+            .role(val.role)
+            .content(val.message.content)
             .build()
             .unwrap()
     }
