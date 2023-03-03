@@ -3,7 +3,7 @@ use std::{
     sync::{Mutex, MutexGuard, PoisonError},
 };
 
-use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionRequestMessageArgs, Role};
+use async_openai::{types::{ChatCompletionRequestMessage, ChatCompletionRequestMessageArgs, Role}, error::OpenAIError};
 use lru::LruCache;
 use serenity::model::prelude::{Message, UserId};
 use thiserror::Error;
@@ -75,12 +75,13 @@ impl ConversationCache {
     }
 }
 
-impl From<ConversationMessage> for ChatCompletionRequestMessage {
-    fn from(val: ConversationMessage) -> Self {
+impl TryFrom<ConversationMessage> for ChatCompletionRequestMessage {
+    type Error = OpenAIError;
+
+    fn try_from(val: ConversationMessage) -> Result<Self, Self::Error> {
         ChatCompletionRequestMessageArgs::default()
             .role(val.role)
             .content(val.message.content)
             .build()
-            .unwrap()
     }
 }

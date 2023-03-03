@@ -44,12 +44,12 @@ impl Handler {
             .content("You are a helpful assistant.")
             .build()?];
 
-        let history: Vec<ChatCompletionRequestMessage> = self
+        let history = self
             .conversation_cache
             .get_messages(user_id)?
             .into_iter()
-            .map(|m| m.into())
-            .collect();
+            .map(|m| m.try_into())
+            .collect::<Result<Vec<ChatCompletionRequestMessage>, _>>()?;
         conversations.extend(history);
         conversations.push(
             ChatCompletionRequestMessageArgs::default()
