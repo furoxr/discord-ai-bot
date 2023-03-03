@@ -30,6 +30,9 @@ impl EventHandler for Handler {
             Err(why) => {
                 error!("Error check mentions_me: {:?}", why);
             }
+            Ok(false) => {
+                info!("Content: {:?}", &msg.content);
+            }
             Ok(true) => {
                 info!(
                     "Mentioned by {:?}, Content: {:?}",
@@ -96,9 +99,6 @@ impl EventHandler for Handler {
                         error!("Error sending message: {:?}", why);
                     }
                 }
-            }
-            Ok(false) => {
-                info!("Content: {:?}", &msg.content);
             }
         }
     }
