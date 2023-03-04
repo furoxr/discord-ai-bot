@@ -60,6 +60,21 @@ impl Handler {
 
         Ok(conversations)
     }
+
+    async fn get_ai_response(&self, question: &str, user_id: UserId) -> Result<String> {
+        let conversations = self.build_conversation(question, user_id)?;
+        let request = CreateChatCompletionRequestArgs::default()
+            .model("gpt-3.5-turbo")
+            .messages(conversations)
+            .build()?;
+        let mut response = self.openai_client.chat().create(request).await?;
+        if let Some(choice) = response.choices.pop() {
+            trace!("{}", &choice.message.content);
+            Ok(choice.message.content)
+        } else {
+            Err(anyhow::anyhow!("No response from OpenAI"))
+        }
+    }
 }
 
 #[async_trait]
@@ -88,34 +103,20 @@ impl EventHandler for Handler {
                         Some(x) => x,
                         None => return,
                     };
-                let conversations = try_log!(self.build_conversation(real_content, msg.author.id));
-                let request_build = CreateChatCompletionRequestArgs::default()
-                    .model("gpt-3.5-turbo")
-                    .messages(conversations)
-                    .build();
+                let response = try_log!(self.get_ai_response(real_content, msg.author.id).await);
+                let response_sent = try_log!(
+                    msg.channel_id
+                        .send_message(&ctx.http, |m| {
+                            m.content(response).reference_message(&msg)
+                        })
+                        .await
+                );
 
-                let request = try_log!(request_build);
-                let mut response = try_log!(self.openai_client.chat().create(request).await);
-
-                if let Some(choice) = response.choices.pop() {
-                    trace!("{}", &choice.message.content);
-                    let message_sent = try_log!(
-                        msg.channel_id
-                            .send_message(&ctx.http, |m| {
-                                m.content(choice.message.content).reference_message(&msg)
-                            })
-                            .await
-                    );
-
-                    vec![
-                        (Role::User, msg.clone()),
-                        (Role::Assistant, message_sent),
-                    ]
+                vec![(Role::User, msg.clone()), (Role::Assistant, response_sent)]
                     .into_iter()
                     .for_each(|x| {
                         try_log!(self.conversation_cache.add_message(msg.author.id, x.0, x.1))
                     });
-                }
             }
         }
     }
