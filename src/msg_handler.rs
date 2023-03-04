@@ -120,7 +120,7 @@ impl EventHandler for Handler {
                         Some(x) => x,
                         None => return,
                     };
-                let response = try_log!(self.get_ai_response(real_content, msg.author.id).await);
+                let response = try_log!(self.get_response(real_content, msg.author.id).await);
                 let response_sent = try_log!(
                     msg.channel_id
                         .send_message(&ctx.http, |m| {
