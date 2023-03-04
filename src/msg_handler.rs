@@ -1,7 +1,7 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use async_openai::types::{
     ChatCompletionRequestMessage, ChatCompletionRequestMessageArgs,
-    CreateChatCompletionRequestArgs, Role,
+    CreateChatCompletionRequestArgs, Role, CreateEmbeddingRequestArgs,
 };
 use async_openai::Client as OpenAIClient;
 use serenity::model::prelude::UserId;
@@ -61,7 +61,7 @@ impl Handler {
         Ok(conversations)
     }
 
-    async fn get_ai_response(&self, question: &str, user_id: UserId) -> Result<String> {
+    async fn get_response(&self, question: &str, user_id: UserId) -> Result<String> {
         let conversations = self.build_conversation(question, user_id)?;
         let request = CreateChatCompletionRequestArgs::default()
             .model("gpt-3.5-turbo")
@@ -72,8 +72,25 @@ impl Handler {
             trace!("{}", &choice.message.content);
             Ok(choice.message.content)
         } else {
-            Err(anyhow::anyhow!("No response from OpenAI"))
+            Err(anyhow!("No chat response from OpenAI"))
         }
+    }
+
+    async fn get_embedding(&self, question: &str) -> Result<Vec<f32>> {
+        let request = CreateEmbeddingRequestArgs::default()
+            .model("text-embedding-ada-002")
+            .input([question])
+            .build()?;
+
+        let mut response = self.openai_client.embeddings().create(request).await?;
+
+        if let Some(data) = response.data.pop() {
+            info!("[{}] has embedding of length {}", data.index, data.embedding.len());
+            Ok(data.embedding)
+        } else {
+            Err(anyhow!("No embedding response from OpenAI"))
+        }
+
     }
 }
 
