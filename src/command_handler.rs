@@ -5,7 +5,7 @@ use structopt::StructOpt;
 use tracing::{error, info};
 use async_openai::Client as OpenAIClient;
 
-use crate::{conversation::ConversationCache, msg_handler::Handler, knowledge_base::{upsert_knowledge, query}};
+use crate::{conversation::ConversationCache, msg_handler::Handler, knowledge_base::{upsert_knowledge, query, clear_collection}};
 
 #[derive(StructOpt, Debug)]
 #[structopt(
@@ -33,7 +33,14 @@ pub enum Opt {
 
         /// A question
         question: String,
+    },
+
+    /// Clear collection
+    Clear {
+        /// Collection name
+        collection: String,
     }
+
 }
 
 pub async fn execute() -> Result<()> {
@@ -68,6 +75,10 @@ pub async fn execute() -> Result<()> {
         Opt::Query {collection, question} => {
             info!("Querying related fact from {:?}: {:?}", collection, question);
             query(&question, &collection).await?;
+        }
+        Opt::Clear { collection } => {
+            info!("Clearing collection: {:?}", collection);
+            clear_collection(&collection).await?;
         }
     }
     Ok(())

@@ -140,3 +140,12 @@ pub async fn query(question: &str, collection_name: &str) -> Result<()> {
     }
     Ok(())
 }
+
+pub async fn clear_collection(collection_name: &str) -> Result<()> {
+    let qdrant_client = KnowledgeClient::new("http://localhost:6334").await?;
+    let response = qdrant_client
+        .delete_collection(collection_name)
+        .await?;
+    info!("Clear collection response: {:?}", response);
+    Ok(())
+}
