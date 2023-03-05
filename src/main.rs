@@ -2,6 +2,7 @@ pub mod command_handler;
 pub mod conversation;
 pub mod helper;
 pub mod msg_handler;
+pub mod knowledge_base;
 
 use anyhow::Result;
 use command_handler::execute;

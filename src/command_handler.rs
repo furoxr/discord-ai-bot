@@ -2,10 +2,10 @@ use std::{path::PathBuf, env};
 use anyhow::Result;
 use serenity::{prelude::GatewayIntents, Client};
 use structopt::StructOpt;
-use tracing::error;
+use tracing::{error, info};
 use async_openai::Client as OpenAIClient;
 
-use crate::{conversation::ConversationCache, msg_handler::Handler};
+use crate::{conversation::ConversationCache, msg_handler::Handler, knowledge_base::upsert_knowledge};
 
 #[derive(StructOpt, Debug)]
 #[structopt(
@@ -18,6 +18,9 @@ pub enum Opt {
 
     /// Upsert knowledge into a knowledge base
     Update {
+        /// Collection name
+        collection: String,
+
         /// JSON file to update knowledge base
         #[structopt(name = "FILE", parse(from_os_str))]
         file: PathBuf,
@@ -49,8 +52,10 @@ pub async fn execute() -> Result<()> {
                 error!("Client error: {:?}", why);
             }
         }
-        Opt::Update { file } => {
-            println!("Upserting knowledge into a knowledge base: {:?}", file);
+        Opt::Update { collection, file } => {
+            info!("Upserting knowledge into a knowledge base: {:?}", file);
+            upsert_knowledge(file, &collection).await?;
+
         }
     }
     Ok(())
