@@ -416,6 +416,8 @@ dependencies = [
  "lru",
  "openssl",
  "qdrant-client",
+ "serde",
+ "serde_json",
  "serenity",
  "structopt",
  "thiserror",

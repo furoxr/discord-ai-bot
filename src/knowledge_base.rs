@@ -1,11 +1,14 @@
-use anyhow::{Result, anyhow};
-use async_openai::{Client as OpenAIClient, types::CreateEmbeddingRequestArgs};
-use tracing::info;
+use anyhow::{anyhow, Result};
+use async_openai::{types::CreateEmbeddingRequestArgs, Client as OpenAIClient};
 use std::{ops::Deref, path::PathBuf};
+use tracing::info;
 
 use qdrant_client::{
-    prelude::{QdrantClient, QdrantClientConfig, Payload},
-    qdrant::{vectors_config::Config, CreateCollection, Distance, VectorParams, VectorsConfig, PointStruct, CountPoints},
+    prelude::{Payload, QdrantClient, QdrantClientConfig},
+    qdrant::{
+        vectors_config::Config, CountPoints, CreateCollection, Distance, PointStruct, SearchPoints,
+        VectorParams, VectorsConfig,
+    },
 };
 use serde::{Deserialize, Serialize};
 
@@ -77,19 +80,63 @@ pub async fn upsert_knowledge(file: PathBuf, collection: &str) -> Result<()> {
     payload.insert("url", raw_payload.url);
 
     // Get embedding from openai
-    let requset = CreateEmbeddingRequestArgs::default().model("text-embedding-ada-002").input(content).build()?;
+    let requset = CreateEmbeddingRequestArgs::default()
+        .model("text-embedding-ada-002")
+        .input(content)
+        .build()?;
     let mut response = openai_client.embeddings().create(requset).await?;
     if let Some(data) = response.data.pop() {
         info!("Get embedding length: {:?}", data.embedding.len());
 
-        let count_request = CountPoints { collection_name: collection.into(), filter: None, exact:  Some(true) };
-        let count = qdrant_client.count(&count_request).await?.result.ok_or(anyhow!("No result"))?.count;
+        let count_request = CountPoints {
+            collection_name: collection.into(),
+            filter: None,
+            exact: Some(true),
+        };
+        let count = qdrant_client
+            .count(&count_request)
+            .await?
+            .result
+            .ok_or(anyhow!("No result"))?
+            .count;
         info!("Current count in collection: {:?}", count);
 
         let point = PointStruct::new(count + 1, data.embedding, payload);
-        let response = qdrant_client.upsert_points(collection, [point].to_vec(), None).await?;
+        let response = qdrant_client
+            .upsert_points(collection, [point].to_vec(), None)
+            .await?;
         info!("Upsert response: {:?}", response);
     }
 
+    Ok(())
+}
+
+pub async fn query(question: &str, collection_name: &str) -> Result<()> {
+    let qdrant_client = KnowledgeClient::new("http://localhost:6334").await?;
+    let openai_client = OpenAIClient::new();
+
+    let request = CreateEmbeddingRequestArgs::default()
+        .model("text-embedding-ada-002")
+        .input(question)
+        .build()?;
+    let mut response = openai_client.embeddings().create(request).await?;
+    if let Some(data) = response.data.pop() {
+        info!("Get embedding length: {:?}", data.embedding.len());
+        let search = SearchPoints {
+            collection_name: collection_name.into(),
+            vector: data.embedding,
+            filter: None,
+            limit: 3,
+            with_payload: None,
+            params: None,
+            score_threshold: None,
+            offset: None,
+            vector_name: None,
+            with_vectors: None,
+            read_consistency: None,
+        };
+        let response = qdrant_client.search_points(&search).await?;
+        info!("{:?}", response);
+    }
     Ok(())
 }

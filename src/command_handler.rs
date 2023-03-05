@@ -5,7 +5,7 @@ use structopt::StructOpt;
 use tracing::{error, info};
 use async_openai::Client as OpenAIClient;
 
-use crate::{conversation::ConversationCache, msg_handler::Handler, knowledge_base::upsert_knowledge};
+use crate::{conversation::ConversationCache, msg_handler::Handler, knowledge_base::{upsert_knowledge, query}};
 
 #[derive(StructOpt, Debug)]
 #[structopt(
@@ -25,6 +25,15 @@ pub enum Opt {
         #[structopt(name = "FILE", parse(from_os_str))]
         file: PathBuf,
     },
+
+    /// Query knowledge base
+    Query {
+        /// Collection name
+        collection: String,
+
+        /// A question
+        question: String,
+    }
 }
 
 pub async fn execute() -> Result<()> {
@@ -55,7 +64,10 @@ pub async fn execute() -> Result<()> {
         Opt::Update { collection, file } => {
             info!("Upserting knowledge into a knowledge base: {:?}", file);
             upsert_knowledge(file, &collection).await?;
-
+        }
+        Opt::Query {collection, question} => {
+            info!("Querying related fact from {:?}: {:?}", collection, question);
+            query(&question, &collection).await?;
         }
     }
     Ok(())
