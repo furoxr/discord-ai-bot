@@ -106,20 +106,16 @@ impl Handler {
                 } else {
                     return Err(anyhow!("Incorect knowledge format!"));
                 };
+
+                let context = format!("{}\n Could you answer with the context: {}", question, &content);
                 conversations.push(
                     ChatCompletionRequestMessageArgs::default()
                         .role(Role::User)
-                        .content(content)
-                        .build()?,
-                );
-                conversations.push(
-                    ChatCompletionRequestMessageArgs::default()
-                        .role(Role::User)
-                        .content(question)
+                        .content(context)
                         .build()?,
                 );
                 let mut response = self.get_chat_complete(conversations).await?;
-                response.push_str(&format!("/n/n ref: {}", ref_url));
+                response.push_str(&format!("\n\n ref: {}", ref_url));
                 Ok(response)
             }
         }
