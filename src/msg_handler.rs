@@ -15,7 +15,7 @@ use serenity::{
     model::{channel::Message, gateway::Ready, prelude::UserId},
     prelude::*,
 };
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, debug};
 
 use crate::{conversation::ConversationCache, helper::try_log, knowledge_base::KnowledgeClient};
 
@@ -42,7 +42,11 @@ impl Handler {
     fn build_conversation(&self, user_id: UserId) -> Result<Vec<ChatCompletionRequestMessage>> {
         let mut conversations = vec![ChatCompletionRequestMessageArgs::default()
             .role(Role::System)
-            .content("You are a helpful assistant.")
+            .content("I will ask with format like this:
+            Question: {text}
+            Knowledge: {text}
+            You are a helpful assistant, and you should answer question after the 'Question'.
+            And there may be related knowledge after knowledge you could refer to. ")
             .build()?];
 
         let history = self
@@ -65,13 +69,14 @@ impl Handler {
                 selector_options: Some(SelectorOptions::Enable(true)),
             }),
             params: None,
-            score_threshold: None,
+            score_threshold: Some(0.8),
             offset: None,
             vector_name: None,
             with_vectors: None,
             read_consistency: None,
         };
         let mut response = self.knowledge_client.search_points(&search).await?;
+        response.result.reverse();
         if let Some(response) = response.result.pop() {
             Ok(response)
         } else {
@@ -101,22 +106,21 @@ impl Handler {
                     .payload
                     .get("url")
                     .ok_or_else(|| anyhow!("Incorect knowledge format!"))?;
-                let ref_url = if let Some(Kind::StringValue(url)) = ref_url_value.kind.clone() {
+                let _ref_url = if let Some(Kind::StringValue(url)) = ref_url_value.kind.clone() {
                     url
                 } else {
                     return Err(anyhow!("Incorect knowledge format!"));
                 };
-
-                let context = format!("{}\n Could you answer with the context: {}", question, &content);
+                debug!("Knowledge url: {}", &_ref_url);
+                let context = format!("Question: {}\nKnowledge: {}", question, &content);
                 conversations.push(
                     ChatCompletionRequestMessageArgs::default()
                         .role(Role::User)
                         .content(context)
                         .build()?,
                 );
-                let mut response = self.get_chat_complete(conversations).await?;
-                response.push_str(&format!("\n\n ref: {}", ref_url));
-                Ok(response)
+                self.get_chat_complete(conversations).await
+                // response.push_str(&format!("\n\n ref: {}", ref_url));
             }
         }
     }
@@ -150,15 +154,16 @@ impl Handler {
     }
 
     async fn get_embedding(&self, question: &str) -> Result<Vec<f32>> {
+        debug!("Get embedding for '{}'", question);
         let request = CreateEmbeddingRequestArgs::default()
             .model("text-embedding-ada-002")
-            .input([question])
+            .input(question)
             .build()?;
 
         let mut response = self.openai_client.embeddings().create(request).await?;
 
         if let Some(data) = response.data.pop() {
-            info!(
+            debug!(
                 "[{}] has embedding of length {}",
                 data.index,
                 data.embedding.len()
