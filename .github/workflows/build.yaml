@@ -26,7 +26,12 @@ jobs:
             git curl ca-certificates \
             make gcc g++ clang-10 \
             libssl-dev pkg-config zip \
-            protobuf-compiler
+      - name: Add protobuf-compiler
+        run: |
+          curl https://github.com/protocolbuffers/protobuf/releases/download/v22.0/protoc-22.0-linux-x86_64.zip
+          sudo unzip -o protoc-22.0-linux-x86_64.zip -d /usr/local bin/protoc
+          sudo unzip -o protoc-22.0-linux-x86_64.zip -d /usr/local 'include/*'
+          protoc --version
       - name: Build openssl
         run: |
           curl https://www.openssl.org/source/openssl-1.1.1l.tar.gz | tar xz
