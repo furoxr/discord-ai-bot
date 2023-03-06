@@ -25,10 +25,10 @@ jobs:
           apt install --no-install-recommends -y \
             git curl ca-certificates \
             make gcc g++ clang-10 \
-            libssl-dev pkg-config zip unzip \
+            libssl-dev pkg-config zip unzip wget \
       - name: Add protobuf-compiler
         run: |
-          curl -O https://github.com/protocolbuffers/protobuf/releases/download/v22.0/protoc-22.0-linux-x86_64.zip
+          wget https://github.com/protocolbuffers/protobuf/releases/download/v22.0/protoc-22.0-linux-x86_64.zip
           unzip -o protoc-22.0-linux-x86_64.zip -d /usr/local bin/protoc
           unzip -o protoc-22.0-linux-x86_64.zip -d /usr/local 'include/*'
           protoc --version
