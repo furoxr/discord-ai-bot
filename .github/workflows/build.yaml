@@ -28,7 +28,7 @@ jobs:
             libssl-dev pkg-config zip unzip \
       - name: Add protobuf-compiler
         run: |
-          curl https://github.com/protocolbuffers/protobuf/releases/download/v22.0/protoc-22.0-linux-x86_64.zip
+          curl -O https://github.com/protocolbuffers/protobuf/releases/download/v22.0/protoc-22.0-linux-x86_64.zip
           unzip -o protoc-22.0-linux-x86_64.zip -d /usr/local bin/protoc
           unzip -o protoc-22.0-linux-x86_64.zip -d /usr/local 'include/*'
           protoc --version
