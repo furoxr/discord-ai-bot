@@ -6,8 +6,9 @@ use tracing::info;
 use qdrant_client::{
     prelude::{Payload, QdrantClient, QdrantClientConfig},
     qdrant::{
-        vectors_config::Config, CountPoints, CreateCollection, Distance, PointStruct, SearchPoints,
-        VectorParams, VectorsConfig,
+        vectors_config::Config, with_payload_selector::SelectorOptions, CountPoints,
+        CreateCollection, Distance, PointStruct, SearchPoints, VectorParams, VectorsConfig,
+        WithPayloadSelector,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -97,7 +98,7 @@ pub async fn upsert_knowledge(file: PathBuf, collection: &str) -> Result<()> {
             .count(&count_request)
             .await?
             .result
-            .ok_or(anyhow!("No result"))?
+            .ok_or_else(|| anyhow!("No result"))?
             .count;
         info!("Current count in collection: {:?}", count);
 
@@ -127,9 +128,11 @@ pub async fn query(question: &str, collection_name: &str) -> Result<()> {
             vector: data.embedding,
             filter: None,
             limit: 3,
-            with_payload: None,
+            with_payload: Some(WithPayloadSelector {
+                selector_options: Some(SelectorOptions::Enable(true)),
+            }),
             params: None,
-            score_threshold: None,
+            score_threshold: Some(0.8),
             offset: None,
             vector_name: None,
             with_vectors: None,
@@ -143,9 +146,7 @@ pub async fn query(question: &str, collection_name: &str) -> Result<()> {
 
 pub async fn clear_collection(collection_name: &str) -> Result<()> {
     let qdrant_client = KnowledgeClient::new("http://localhost:6334").await?;
-    let response = qdrant_client
-        .delete_collection(collection_name)
-        .await?;
+    let response = qdrant_client.delete_collection(collection_name).await?;
     info!("Clear collection response: {:?}", response);
     Ok(())
 }

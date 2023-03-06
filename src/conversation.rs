@@ -3,7 +3,10 @@ use std::{
     sync::{Mutex, MutexGuard, PoisonError},
 };
 
-use async_openai::{types::{ChatCompletionRequestMessage, ChatCompletionRequestMessageArgs, Role}, error::OpenAIError};
+use async_openai::{
+    error::OpenAIError,
+    types::{ChatCompletionRequestMessage, ChatCompletionRequestMessageArgs, Role},
+};
 use lru::LruCache;
 use serenity::model::prelude::{Message, UserId};
 use thiserror::Error;

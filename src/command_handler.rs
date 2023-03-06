@@ -5,7 +5,7 @@ use structopt::StructOpt;
 use tracing::{error, info};
 use async_openai::Client as OpenAIClient;
 
-use crate::{conversation::ConversationCache, msg_handler::Handler, knowledge_base::{upsert_knowledge, query, clear_collection}};
+use crate::{conversation::ConversationCache, msg_handler::Handler, knowledge_base::{upsert_knowledge, query, clear_collection, KnowledgeClient}};
 
 #[derive(StructOpt, Debug)]
 #[structopt(
@@ -56,10 +56,12 @@ pub async fn execute() -> Result<()> {
 
             let openai_client = OpenAIClient::new();
             let conversation_cache = ConversationCache::default();
+            let qdrant_client = KnowledgeClient::new("http://localhost:6334").await?;
             let mut client = Client::builder(&token, intents)
                 .event_handler(Handler {
                     openai_client,
                     conversation_cache,
+                    knowledge_client: qdrant_client,
                 })
                 .await
                 .expect("Err creating discord bot client");
