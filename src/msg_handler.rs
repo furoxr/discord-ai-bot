@@ -69,7 +69,8 @@ impl Handler {
                 selector_options: Some(SelectorOptions::Enable(true)),
             }),
             params: None,
-            score_threshold: Some(0.8),
+            // score_threshold: Some(0.8),
+            score_threshold: None,
             offset: None,
             vector_name: None,
             with_vectors: None,
@@ -196,6 +197,7 @@ impl EventHandler for Handler {
                     &msg.author.name, &msg.content
                 );
 
+                let typing = try_log!(msg.channel_id.start_typing(&ctx.http));
                 let real_content =
                     match Self::extract_legal_content(ctx.cache.current_user_id(), &msg) {
                         Some(x) => x,
@@ -205,6 +207,7 @@ impl EventHandler for Handler {
                     self.get_response_with_knowledge(real_content, msg.author.id)
                         .await
                 );
+                let _t = typing.stop();
                 let response_sent = try_log!(
                     msg.channel_id
                         .send_message(&ctx.http, |m| {
