@@ -7,10 +7,6 @@ use async_openai::{
     Client as OpenAIClient,
 };
 use log_error::LogError;
-use qdrant_client::qdrant::{
-    value::Kind, with_payload_selector::SelectorOptions, ScoredPoint, SearchPoints,
-    WithPayloadSelector,
-};
 use serenity::{
     async_trait,
     model::{channel::Message, gateway::Ready, prelude::UserId},
