@@ -1,25 +1,42 @@
 use anyhow::{anyhow, Result};
 use async_openai::{types::CreateEmbeddingRequestArgs, Client as OpenAIClient};
-use std::{ops::Deref, path::PathBuf};
+use std::{collections::HashMap, ops::Deref, path::PathBuf};
 use tracing::{error, info, trace};
 use uuid::Uuid;
 
 use qdrant_client::{
     prelude::{Payload, QdrantClient, QdrantClientConfig},
     qdrant::{
-        vectors_config::Config, with_payload_selector::SelectorOptions,
+        value::Kind, vectors_config::Config, with_payload_selector::SelectorOptions,
         CollectionOperationResponse, CountPoints, CreateCollection, Distance, PointStruct,
-        PointsOperationResponse, ScoredPoint, SearchPoints, VectorParams, VectorsConfig,
+        PointsOperationResponse, SearchPoints, Value, VectorParams, VectorsConfig,
         WithPayloadSelector,
     },
 };
 use serde::{Deserialize, Serialize};
+
+use crate::helper::try_match;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KnowledgePayload {
     url: String,
     title: String,
     content: String,
+}
+
+impl TryFrom<HashMap<String, Value>> for KnowledgePayload {
+    type Error = anyhow::Error;
+
+    fn try_from(value: HashMap<String, Value>) -> Result<Self, Self::Error> {
+        let url = try_match!(value, "url", StringValue);
+        let title = try_match!(value, "title", StringValue);
+        let content = try_match!(value, "content", StringValue);
+        Ok(Self {
+            url,
+            title,
+            content,
+        })
+    }
 }
 
 pub struct KnowledgeClient {
@@ -41,7 +58,7 @@ impl KnowledgeClient {
         collection_name: &str,
         embedding: Vec<f32>,
         score_threshold: Option<f32>,
-    ) -> Result<Vec<ScoredPoint>> {
+    ) -> Result<Vec<KnowledgePayload>> {
         let points = self
             .search_points(&SearchPoints {
                 collection_name: collection_name.into(),
@@ -58,7 +75,12 @@ impl KnowledgeClient {
             return Err(anyhow!("No knowledge found"));
         }
         trace!("query_knowledge costs: {}", points.time);
-        Ok(points.result)
+        let result = points
+            .result
+            .into_iter()
+            .map(|x| x.payload.try_into())
+            .collect::<Result<Vec<KnowledgePayload>>>()?;
+        Ok(result)
     }
 
     pub async fn create_knowledge_collection(
