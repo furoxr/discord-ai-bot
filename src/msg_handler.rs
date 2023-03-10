@@ -6,6 +6,7 @@ use async_openai::{
     },
     Client as OpenAIClient,
 };
+use log_error::LogError;
 use qdrant_client::qdrant::{
     value::Kind, with_payload_selector::SelectorOptions, ScoredPoint, SearchPoints,
     WithPayloadSelector,
@@ -15,7 +16,7 @@ use serenity::{
     model::{channel::Message, gateway::Ready, prelude::UserId},
     prelude::*,
 };
-use tracing::{error, info, trace, debug};
+use tracing::{debug, error, info, trace};
 
 use crate::{conversation::ConversationCache, helper::try_log, knowledge_base::KnowledgeClient};
 
@@ -42,11 +43,13 @@ impl Handler {
     fn build_conversation(&self, user_id: UserId) -> Result<Vec<ChatCompletionRequestMessage>> {
         let mut conversations = vec![ChatCompletionRequestMessageArgs::default()
             .role(Role::System)
-            .content("I will ask with format like this:
+            .content(
+                "I will ask with format like this:
             Question: {text}
             Knowledge: {text}
             You are a helpful assistant, and you should answer question after the 'Question'.
-            And there may be related knowledge after knowledge you could refer to. ")
+            And there may be related knowledge after knowledge you could refer to. ",
+            )
             .build()?];
 
         let history = self
@@ -85,45 +88,39 @@ impl Handler {
         }
     }
 
-    async fn get_response_with_knowledge(&self, question: &str, user_id: UserId) -> Result<String> {
-        let embedding = self.get_embedding(question).await?;
-        match self.query_knowledge(embedding).await {
-            // If there is no knowledge, just use openai to generate response.
-            Err(_) => self.get_response(question, user_id).await,
-
-            // If there is knowledge, append it to conversation.
-            Ok(knowledge) => {
-                let mut conversations = self.build_conversation(user_id)?;
-                let content_value = knowledge
-                    .payload
-                    .get("content")
-                    .ok_or_else(|| anyhow!("Incorect knowledge format!"))?;
-                let content = if let Some(Kind::StringValue(content)) = content_value.kind.clone() {
-                    content
-                } else {
-                    return Err(anyhow!("Incorect knowledge format!"));
-                };
-                let ref_url_value = knowledge
-                    .payload
-                    .get("url")
-                    .ok_or_else(|| anyhow!("Incorect knowledge format!"))?;
-                let _ref_url = if let Some(Kind::StringValue(url)) = ref_url_value.kind.clone() {
-                    url
-                } else {
-                    return Err(anyhow!("Incorect knowledge format!"));
-                };
-                debug!("Knowledge url: {}", &_ref_url);
-                let context = format!("Question: {}\nKnowledge: {}", question, &content);
-                conversations.push(
-                    ChatCompletionRequestMessageArgs::default()
-                        .role(Role::User)
-                        .content(context)
-                        .build()?,
-                );
-                self.get_chat_complete(conversations).await
-                // response.push_str(&format!("\n\n ref: {}", ref_url));
-            }
-        }
+    fn build_conversation_with_knowledge(
+        &self,
+        mut conversation: Vec<ChatCompletionRequestMessage>,
+        knowledge: ScoredPoint,
+        question: &str,
+    ) -> Result<Vec<ChatCompletionRequestMessage>> {
+        let content_value = knowledge
+            .payload
+            .get("content")
+            .ok_or_else(|| anyhow!("Incorect knowledge format!"))?;
+        let content = if let Some(Kind::StringValue(content)) = content_value.kind.clone() {
+            content
+        } else {
+            return Err(anyhow!("Incorect knowledge format!"));
+        };
+        let ref_url_value = knowledge
+            .payload
+            .get("url")
+            .ok_or_else(|| anyhow!("Incorect knowledge format!"))?;
+        let _ref_url = if let Some(Kind::StringValue(url)) = ref_url_value.kind.clone() {
+            url
+        } else {
+            return Err(anyhow!("Incorect knowledge format!"));
+        };
+        debug!("Knowledge url: {}", &_ref_url);
+        let context = format!("Question: {}\nKnowledge: {}", question, &content);
+        conversation.push(
+            ChatCompletionRequestMessageArgs::default()
+                .role(Role::User)
+                .content(context)
+                .build()?,
+        );
+        Ok(conversation)
     }
 
     async fn get_chat_complete(
@@ -141,17 +138,6 @@ impl Handler {
         } else {
             Err(anyhow!("No chat response from OpenAI"))
         }
-    }
-
-    async fn get_response(&self, question: &str, user_id: UserId) -> Result<String> {
-        let mut conversations = self.build_conversation(user_id)?;
-        conversations.push(
-            ChatCompletionRequestMessageArgs::default()
-                .role(Role::User)
-                .content(question)
-                .build()?,
-        );
-        self.get_chat_complete(conversations).await
     }
 
     async fn get_embedding(&self, question: &str) -> Result<Vec<f32>> {
@@ -174,6 +160,67 @@ impl Handler {
             Err(anyhow!("No embedding response from OpenAI"))
         }
     }
+
+    async fn _message(&self, ctx: Context, msg: Message) -> Result<()> {
+        match msg.mentions_me(&ctx).await {
+            Err(why) => {
+                error!("Error check mentions_me: {:?}", why);
+                Ok(())
+            }
+            Ok(false) => {
+                trace!("Content: {:?}", &msg.content);
+                Ok(())
+            }
+            Ok(true) => {
+                info!(
+                    "Mentioned by {:?}, Content: {:?}",
+                    &msg.author.name, &msg.content
+                );
+
+                let typing = msg.channel_id.start_typing(&ctx.http)?;
+                let real_content =
+                    match Self::extract_legal_content(ctx.cache.current_user_id(), &msg) {
+                        Some(x) => x,
+                        None => return Ok(()),
+                    };
+
+                let mut conversation = self.build_conversation(msg.author.id)?;
+                let embedding = self.get_embedding(real_content).await?;
+                let conversation = match self.query_knowledge(embedding).await {
+                    Ok(knowledge) => self.build_conversation_with_knowledge(
+                        conversation,
+                        knowledge,
+                        real_content,
+                    )?,
+                    Err(_) => {
+                        conversation.push(
+                            ChatCompletionRequestMessageArgs::default()
+                                .role(Role::User)
+                                .content(real_content)
+                                .build()?,
+                        );
+                        conversation
+                    }
+                };
+
+                let response = self.get_chat_complete(conversation).await?;
+                let _t = typing.stop();
+                let response_sent = msg
+                    .channel_id
+                    .send_message(&ctx.http, |m| m.content(response).reference_message(&msg))
+                    .await?;
+
+                vec![(Role::User, msg.clone()), (Role::Assistant, response_sent)]
+                    .into_iter()
+                    .for_each(|x| {
+                        self.conversation_cache
+                            .add_message(msg.author.id, x.0, x.1)
+                            .log_error("Cache Conversation failed");
+                    });
+                Ok(())
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -184,45 +231,7 @@ impl EventHandler for Handler {
     // Event handlers are dispatched through a threadpool, and so multiple
     // events can be dispatched simultaneously.
     async fn message(&self, ctx: Context, msg: Message) {
-        match msg.mentions_me(&ctx).await {
-            Err(why) => {
-                error!("Error check mentions_me: {:?}", why);
-            }
-            Ok(false) => {
-                trace!("Content: {:?}", &msg.content);
-            }
-            Ok(true) => {
-                info!(
-                    "Mentioned by {:?}, Content: {:?}",
-                    &msg.author.name, &msg.content
-                );
-
-                let typing = try_log!(msg.channel_id.start_typing(&ctx.http));
-                let real_content =
-                    match Self::extract_legal_content(ctx.cache.current_user_id(), &msg) {
-                        Some(x) => x,
-                        None => return,
-                    };
-                let response = try_log!(
-                    self.get_response_with_knowledge(real_content, msg.author.id)
-                        .await
-                );
-                let _t = typing.stop();
-                let response_sent = try_log!(
-                    msg.channel_id
-                        .send_message(&ctx.http, |m| {
-                            m.content(response).reference_message(&msg)
-                        })
-                        .await
-                );
-
-                vec![(Role::User, msg.clone()), (Role::Assistant, response_sent)]
-                    .into_iter()
-                    .for_each(|x| {
-                        try_log!(self.conversation_cache.add_message(msg.author.id, x.0, x.1))
-                    });
-            }
-        }
+        try_log!(self._message(ctx, msg).await)
     }
 
     async fn ready(&self, _: Context, ready: Ready) {
