@@ -21,7 +21,7 @@ use tracing::{debug, error, info, trace};
 use crate::{
     conversation::{ConversationCache, ConversationCtx},
     helper::try_log,
-    knowledge_base::KnowledgeClient,
+    knowledge_base::{KnowledgeClient, KnowledgePayload},
 };
 
 pub struct Handler {
@@ -60,26 +60,14 @@ impl Handler {
         Ok(conversation)
     }
 
-    pub async fn query_knowledge(&self, embedding: Vec<f32>) -> Result<ScoredPoint> {
-        let search = SearchPoints {
-            collection_name: "darwinia".into(),
-            vector: embedding,
-            filter: None,
-            limit: 3,
-            with_payload: Some(WithPayloadSelector {
-                selector_options: Some(SelectorOptions::Enable(true)),
-            }),
-            params: None,
-            // score_threshold: Some(0.8),
-            score_threshold: None,
-            offset: None,
-            vector_name: None,
-            with_vectors: None,
-            read_consistency: None,
-        };
-        let mut response = self.knowledge_client.search_points(&search).await?;
-        response.result.reverse();
-        if let Some(response) = response.result.pop() {
+    pub async fn query_knowledge(&self, embedding: Vec<f32>) -> Result<KnowledgePayload> {
+        let mut response = self
+            .knowledge_client
+            .query_knowledge("darwinia", embedding, Some(0.78))
+            .await?;
+        response.reverse();
+
+        if let Some(response) = response.pop() {
             Ok(response)
         } else {
             Err(anyhow!("No result found"))
@@ -89,30 +77,11 @@ impl Handler {
     fn build_conversation_with_knowledge(
         &self,
         mut conversation: ConversationCtx,
-        knowledge: ScoredPoint,
+        knowledge: KnowledgePayload,
         question: &str,
     ) -> Result<ConversationCtx> {
-        let content_value = knowledge
-            .payload
-            .get("content")
-            .ok_or_else(|| anyhow!("Incorect knowledge format!"))?;
-        let content = if let Some(Kind::StringValue(content)) = content_value.kind.clone() {
-            content
-        } else {
-            return Err(anyhow!("Incorect knowledge format!"));
-        };
-        let ref_url_value = knowledge
-            .payload
-            .get("url")
-            .ok_or_else(|| anyhow!("Incorect knowledge format!"))?;
-        let _ref_url = if let Some(Kind::StringValue(url)) = ref_url_value.kind.clone() {
-            url
-        } else {
-            return Err(anyhow!("Incorect knowledge format!"));
-        };
-        debug!("Knowledge url: {}", &_ref_url);
-
-        let context = format!("Question: {}\nKnowledge: {}", question, &content);
+        debug!("Knowledge url: {}", &knowledge.url);
+        let context = format!("Question: {}\nKnowledge: {}", question, &knowledge.content);
         conversation.add_user_message(&context);
         Ok(conversation)
     }

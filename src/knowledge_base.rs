@@ -19,9 +19,9 @@ use crate::helper::try_match;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KnowledgePayload {
-    url: String,
-    title: String,
-    content: String,
+    pub url: String,
+    pub title: String,
+    pub content: String,
 }
 
 impl TryFrom<HashMap<String, Value>> for KnowledgePayload {
