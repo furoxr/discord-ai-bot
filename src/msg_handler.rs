@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
 use async_openai::{
     types::{
-        ChatCompletionRequestMessage, ChatCompletionRequestMessageArgs,
-        CreateChatCompletionRequestArgs, CreateEmbeddingRequestArgs, Role,
+        ChatCompletionRequestMessage, CreateChatCompletionRequestArgs, CreateEmbeddingRequestArgs,
+        Role,
     },
     Client as OpenAIClient,
 };
@@ -18,7 +18,11 @@ use serenity::{
 };
 use tracing::{debug, error, info, trace};
 
-use crate::{conversation::ConversationCache, helper::try_log, knowledge_base::KnowledgeClient};
+use crate::{
+    conversation::{ConversationCache, ConversationCtx},
+    helper::try_log,
+    knowledge_base::KnowledgeClient,
+};
 
 pub struct Handler {
     pub openai_client: OpenAIClient,
@@ -40,26 +44,20 @@ impl Handler {
         Some(real_content)
     }
 
-    fn build_conversation(&self, user_id: UserId) -> Result<Vec<ChatCompletionRequestMessage>> {
-        let mut conversations = vec![ChatCompletionRequestMessageArgs::default()
-            .role(Role::System)
-            .content(
-                "I will ask with format like this:
-            Question: {text}
-            Knowledge: {text}
-            You are a helpful assistant, and you should answer question after the 'Question'.
-            And there may be related knowledge after knowledge you could refer to. ",
-            )
-            .build()?];
+    fn build_conversation(&self, user_id: UserId) -> Result<ConversationCtx> {
+        let mut conversation = ConversationCtx::default();
+        conversation.add_system_message(
+            "I will ask with format like this:
+        Question: {text}
+        Knowledge: {text}
+        You are a helpful assistant, and you should answer question after the 'Question'.
+        And there may be related knowledge after knowledge you could refer to. ",
+        );
 
-        let history = self
-            .conversation_cache
-            .get_messages(user_id)?
-            .into_iter()
-            .map(|m| m.try_into())
-            .collect::<Result<Vec<ChatCompletionRequestMessage>, _>>()?;
-        conversations.extend(history);
-        Ok(conversations)
+        let history: Vec<ChatCompletionRequestMessage> =
+            self.conversation_cache.get_messages(user_id)?.into();
+        conversation.extend(history);
+        Ok(conversation)
     }
 
     pub async fn query_knowledge(&self, embedding: Vec<f32>) -> Result<ScoredPoint> {
@@ -90,10 +88,10 @@ impl Handler {
 
     fn build_conversation_with_knowledge(
         &self,
-        mut conversation: Vec<ChatCompletionRequestMessage>,
+        mut conversation: ConversationCtx,
         knowledge: ScoredPoint,
         question: &str,
-    ) -> Result<Vec<ChatCompletionRequestMessage>> {
+    ) -> Result<ConversationCtx> {
         let content_value = knowledge
             .payload
             .get("content")
@@ -113,23 +111,16 @@ impl Handler {
             return Err(anyhow!("Incorect knowledge format!"));
         };
         debug!("Knowledge url: {}", &_ref_url);
+
         let context = format!("Question: {}\nKnowledge: {}", question, &content);
-        conversation.push(
-            ChatCompletionRequestMessageArgs::default()
-                .role(Role::User)
-                .content(context)
-                .build()?,
-        );
+        conversation.add_user_message(&context);
         Ok(conversation)
     }
 
-    async fn get_chat_complete(
-        &self,
-        conversations: Vec<ChatCompletionRequestMessage>,
-    ) -> Result<String> {
+    async fn get_chat_complete(&self, conversation: ConversationCtx) -> Result<String> {
         let request = CreateChatCompletionRequestArgs::default()
             .model("gpt-3.5-turbo")
-            .messages(conversations)
+            .messages(conversation.value)
             .build()?;
         let mut response = self.openai_client.chat().create(request).await?;
         if let Some(choice) = response.choices.pop() {
@@ -193,12 +184,7 @@ impl Handler {
                         real_content,
                     )?,
                     Err(_) => {
-                        conversation.push(
-                            ChatCompletionRequestMessageArgs::default()
-                                .role(Role::User)
-                                .content(real_content)
-                                .build()?,
-                        );
+                        conversation.add_user_message(real_content);
                         conversation
                     }
                 };
@@ -214,7 +200,7 @@ impl Handler {
                     .into_iter()
                     .for_each(|x| {
                         self.conversation_cache
-                            .add_message(msg.author.id, x.0, x.1)
+                            .add_message(msg.author.id, x.0, &x.1.content)
                             .log_error("Cache Conversation failed");
                     });
                 Ok(())
