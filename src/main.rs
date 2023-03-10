@@ -3,6 +3,7 @@ pub mod conversation;
 pub mod helper;
 pub mod msg_handler;
 pub mod knowledge_base;
+pub mod ai;
 
 use anyhow::Result;
 use command_handler::execute;

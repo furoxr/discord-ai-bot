@@ -60,11 +60,12 @@ impl ConversationCache {
         user_id: UserId,
         role: Role,
         message: &str,
+        name: Option<String>,
     ) -> Result<(), ConversationCacheError> {
         let mut map = self.map.lock()?;
         let ctx = map.get_or_insert_mut(user_id, ConversationCtx::default);
 
-        ctx.add_message(role, message);
+        ctx.add_message(role, message, name);
         if ctx.value.len() > self.max_conversation_length {
             ctx.value.remove(0);
         }
@@ -114,29 +115,30 @@ impl DerefMut for ConversationCtx {
 }
 
 impl ConversationCtx {
-    pub fn add_user_message(&mut self, message: &str) -> &mut Self {
-        self.add_message(Role::User, message);
+    pub fn add_user_message(&mut self, message: &str, name: Option<String>) -> &mut Self {
+        self.add_message(Role::User, message, name);
         self
     }
 
-    pub fn add_system_message(&mut self, message: &str) -> &mut Self {
-        self.add_message(Role::System, message);
+    pub fn add_system_message(&mut self, message: &str, name: Option<String>) -> &mut Self {
+        self.add_message(Role::System, message, name);
         self
     }
 
-    pub fn add_assistant_message(&mut self, message: &str) -> &mut Self {
-        self.add_message(Role::Assistant, message);
+    pub fn add_assistant_message(&mut self, message: &str, name: Option<String>) -> &mut Self {
+        self.add_message(Role::Assistant, message, name);
         self
     }
 
-    pub fn add_message(&mut self, role: Role, message: &str) -> &mut Self {
-        self.value.push(
-            ChatCompletionRequestMessageArgs::default()
-                .role(role)
-                .content(message)
-                .build()
-                .expect("Unreachable!"),
-        );
+    pub fn add_message(&mut self, role: Role, message: &str, name: Option<String>) -> &mut Self {
+        let mut binding = ChatCompletionRequestMessageArgs::default();
+        let mut arg = binding.role(role).content(message);
+        if let Some(name) = name {
+            arg = arg.name(name);
+        }
+        let message = arg.build().expect("Unreachable!");
+        dbg!(&message);
+        self.value.push(message);
         self
     }
 }

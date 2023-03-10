@@ -48,6 +48,7 @@ impl Handler {
         Knowledge: {text}
         You are a helpful assistant, and you should answer question after the 'Question'.
         And there may be related knowledge after knowledge you could refer to. ",
+        None
         );
 
         let history: Vec<ChatCompletionRequestMessage> =
@@ -78,7 +79,7 @@ impl Handler {
     ) -> Result<ConversationCtx> {
         debug!("Knowledge url: {}", &knowledge.url);
         let context = format!("Question: {}\nKnowledge: {}", question, &knowledge.content);
-        conversation.add_user_message(&context);
+        conversation.add_user_message(&context, None);
         Ok(conversation)
     }
 
@@ -149,7 +150,7 @@ impl Handler {
                         real_content,
                     )?,
                     Err(_) => {
-                        conversation.add_user_message(real_content);
+                        conversation.add_user_message(real_content, None);
                         conversation
                     }
                 };
@@ -165,7 +166,7 @@ impl Handler {
                     .into_iter()
                     .for_each(|x| {
                         self.conversation_cache
-                            .add_message(msg.author.id, x.0, &x.1.content)
+                            .add_message(msg.author.id, x.0, &x.1.content, None)
                             .log_error("Cache Conversation failed");
                     });
                 Ok(())
