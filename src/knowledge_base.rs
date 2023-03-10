@@ -1,14 +1,15 @@
 use anyhow::{anyhow, Result};
 use async_openai::{types::CreateEmbeddingRequestArgs, Client as OpenAIClient};
 use std::{ops::Deref, path::PathBuf};
-use tracing::info;
+use tracing::{info, trace};
+use uuid::Uuid;
 
 use qdrant_client::{
     prelude::{Payload, QdrantClient, QdrantClientConfig},
     qdrant::{
         vectors_config::Config, with_payload_selector::SelectorOptions, CountPoints,
-        CreateCollection, Distance, PointStruct, SearchPoints, VectorParams, VectorsConfig,
-        WithPayloadSelector,
+        CreateCollection, Distance, PointStruct, ScoredPoint, SearchPoints, VectorParams,
+        VectorsConfig, WithPayloadSelector,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,68 @@ impl KnowledgeClient {
     }
 }
 
+impl KnowledgeClient {
+    pub async fn query_knowledge(
+        &self,
+        collection_name: &str,
+        embedding: Vec<f32>,
+        score_threshold: Option<f32>,
+    ) -> Result<Vec<ScoredPoint>> {
+        let points = self
+            .search_points(&SearchPoints {
+                collection_name: collection_name.into(),
+                vector: embedding,
+                limit: 3,
+                with_payload: Some(WithPayloadSelector {
+                    selector_options: Some(SelectorOptions::Enable(true)),
+                }),
+                score_threshold,
+                ..Default::default()
+            })
+            .await?;
+        if points.result.is_empty() {
+            return Err(anyhow!("No knowledge found"));
+        }
+        trace!("query_knowledge costs: {}", points.time);
+        Ok(points.result)
+    }
+
+    pub async fn create_knowledge_collection(&self, collection_name: &str) -> Result<()> {
+        if self.has_collection(collection_name).await? {
+            return Ok(());
+        }
+        self.create_collection(&CreateCollection {
+            collection_name: collection_name.into(),
+            vectors_config: Some(VectorsConfig {
+                config: Some(Config::Params(VectorParams {
+                    size: 1536,
+                    distance: Distance::Cosine.into(),
+                })),
+            }),
+            ..Default::default()
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub async fn upsert_knowledge(
+        &self,
+        collection_name: &str,
+        knowledge: KnowledgePayload,
+        embedding: Vec<f32>,
+    ) -> Result<()> {
+        let mut payload = Payload::new();
+        trace!("Upserting knowledge: {:?}", &knowledge.title);
+        payload.insert("title", knowledge.title);
+        payload.insert("content", knowledge.content);
+        payload.insert("url", knowledge.url);
+        let point = PointStruct::new(Uuid::new_v4().to_string(), embedding, payload);
+        self.upsert_points(collection_name, [point].to_vec(), None)
+            .await?;
+        Ok(())
+    }
+}
+
 impl Deref for KnowledgeClient {
     type Target = QdrantClient;
 
@@ -41,30 +104,13 @@ impl Deref for KnowledgeClient {
     }
 }
 
-pub async fn upsert_knowledge(file: PathBuf, collection: &str) -> Result<()> {
-    let qdrant_client = KnowledgeClient::new("http://localhost:6334").await?;
+pub async fn upsert_knowledge(qdrant_url: &str, file: PathBuf, collection: &str) -> Result<()> {
+    let qdrant_client = KnowledgeClient::new(qdrant_url).await?;
     let openai_client = OpenAIClient::new();
 
     if !qdrant_client.has_collection(collection).await? {
         let response = qdrant_client
-            .create_collection(&CreateCollection {
-                collection_name: collection.into(),
-                vectors_config: Some(VectorsConfig {
-                    config: Some(Config::Params(VectorParams {
-                        size: 1536,
-                        distance: Distance::Cosine.into(),
-                    })),
-                }),
-                hnsw_config: None,
-                wal_config: None,
-                optimizers_config: None,
-                shard_number: None,
-                on_disk_payload: None,
-                timeout: None,
-                replication_factor: None,
-                write_consistency_factor: None,
-                init_from_collection: None,
-            })
+            .create_knowledge_collection("darwinia")
             .await?;
         info!("Creating collection operation response: {:?}", response);
     }
@@ -74,11 +120,6 @@ pub async fn upsert_knowledge(file: PathBuf, collection: &str) -> Result<()> {
     let text = std::fs::read_to_string(file)?;
     let raw_payload: KnowledgePayload = serde_json::from_str(&text)?;
     let content = raw_payload.content.clone();
-    let mut payload = Payload::new();
-    info!("Title: {:?}", &raw_payload.title);
-    payload.insert("title", raw_payload.title);
-    payload.insert("content", raw_payload.content);
-    payload.insert("url", raw_payload.url);
 
     // Get embedding from openai
     let requset = CreateEmbeddingRequestArgs::default()
@@ -102,9 +143,8 @@ pub async fn upsert_knowledge(file: PathBuf, collection: &str) -> Result<()> {
             .count;
         info!("Current count in collection: {:?}", count);
 
-        let point = PointStruct::new(count + 1, data.embedding, payload);
         let response = qdrant_client
-            .upsert_points(collection, [point].to_vec(), None)
+            .upsert_knowledge(collection, raw_payload, data.embedding)
             .await?;
         info!("Upsert response: {:?}", response);
     }
@@ -112,8 +152,8 @@ pub async fn upsert_knowledge(file: PathBuf, collection: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn query(question: &str, collection_name: &str) -> Result<()> {
-    let qdrant_client = KnowledgeClient::new("http://localhost:6334").await?;
+pub async fn query(qdrant_url: &str, question: &str, collection_name: &str) -> Result<()> {
+    let qdrant_client = KnowledgeClient::new(qdrant_url).await?;
     let openai_client = OpenAIClient::new();
 
     let request = CreateEmbeddingRequestArgs::default()
@@ -123,29 +163,16 @@ pub async fn query(question: &str, collection_name: &str) -> Result<()> {
     let mut response = openai_client.embeddings().create(request).await?;
     if let Some(data) = response.data.pop() {
         info!("Get embedding length: {:?}", data.embedding.len());
-        let search = SearchPoints {
-            collection_name: collection_name.into(),
-            vector: data.embedding,
-            filter: None,
-            limit: 3,
-            with_payload: Some(WithPayloadSelector {
-                selector_options: Some(SelectorOptions::Enable(true)),
-            }),
-            params: None,
-            score_threshold: Some(0.8),
-            offset: None,
-            vector_name: None,
-            with_vectors: None,
-            read_consistency: None,
-        };
-        let response = qdrant_client.search_points(&search).await?;
+        let response = qdrant_client
+            .query_knowledge(collection_name, data.embedding, None)
+            .await?;
         info!("{:?}", response);
     }
     Ok(())
 }
 
-pub async fn clear_collection(collection_name: &str) -> Result<()> {
-    let qdrant_client = KnowledgeClient::new("http://localhost:6334").await?;
+pub async fn clear_collection(qdrant_url: &str, collection_name: &str) -> Result<()> {
+    let qdrant_client = KnowledgeClient::new(qdrant_url).await?;
     let response = qdrant_client.delete_collection(collection_name).await?;
     info!("Clear collection response: {:?}", response);
     Ok(())

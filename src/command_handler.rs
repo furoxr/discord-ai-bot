@@ -1,20 +1,46 @@
-use std::{path::PathBuf, env};
 use anyhow::Result;
+use async_openai::Client as OpenAIClient;
 use serenity::{prelude::GatewayIntents, Client};
+use std::path::PathBuf;
 use structopt::StructOpt;
 use tracing::{error, info};
-use async_openai::Client as OpenAIClient;
 
-use crate::{conversation::ConversationCache, msg_handler::Handler, knowledge_base::{upsert_knowledge, query, clear_collection, KnowledgeClient}};
+use crate::{
+    conversation::ConversationCache,
+    knowledge_base::{clear_collection, query, upsert_knowledge, KnowledgeClient},
+    msg_handler::Handler,
+};
 
 #[derive(StructOpt, Debug)]
 #[structopt(
     name = "discord-ai-bot",
-    about = "A tool to upsert knowledge into a knowledge base"
+    about = "A tool that enables the creation of a Discord AI bot service utilizing the power of GPT-3.5"
 )]
+pub struct DiscordAiBot {
+    /// Openai api key
+    #[structopt(name = "openai-api-key", env = "OPENAI_API_KEY")]
+    openai_api_key: String,
+
+    #[structopt(
+        name = "qdrant-rpc-url",
+        default_value = "http://localhost:6334",
+        help = "Qdrant database grpc query url"
+    )]
+    qdrant_grpc_url: String,
+
+    #[structopt(subcommand)]
+    cmd: Opt,
+}
+
+#[derive(StructOpt, Debug)]
+#[structopt(name = "discord-ai-bot")]
 pub enum Opt {
     /// Start discord ai bot service
-    Start,
+    Start {
+        /// Discord bot token
+        #[structopt(name = "discord-bot-token", env = "DISCORD_TOKEN")]
+        discord_bot_token: String,
+    },
 
     /// Upsert knowledge into a knowledge base
     Update {
@@ -39,25 +65,27 @@ pub enum Opt {
     Clear {
         /// Collection name
         collection: String,
-    }
-
+    },
 }
 
 pub async fn execute() -> Result<()> {
-    let opt = Opt::from_args();
-    match opt {
-        Opt::Start => {
-            // Configure the client with your Discord bot token in the environment.
-            let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+    let DiscordAiBot {
+        qdrant_grpc_url,
+        openai_api_key,
+        cmd,
+    } = DiscordAiBot::from_args();
+
+    match cmd {
+        Opt::Start { discord_bot_token } => {
             // Set gateway intents, which decides what events the bot will be notified about
             let intents = GatewayIntents::GUILD_MESSAGES
                 | GatewayIntents::DIRECT_MESSAGES
                 | GatewayIntents::MESSAGE_CONTENT;
 
-            let openai_client = OpenAIClient::new();
+            let openai_client = OpenAIClient::new().with_api_key(openai_api_key);
             let conversation_cache = ConversationCache::default();
-            let qdrant_client = KnowledgeClient::new("http://localhost:6334").await?;
-            let mut client = Client::builder(&token, intents)
+            let qdrant_client = KnowledgeClient::new(&qdrant_grpc_url).await?;
+            let mut client = Client::builder(&discord_bot_token, intents)
                 .event_handler(Handler {
                     openai_client,
                     conversation_cache,
@@ -72,15 +100,21 @@ pub async fn execute() -> Result<()> {
         }
         Opt::Update { collection, file } => {
             info!("Upserting knowledge into a knowledge base: {:?}", file);
-            upsert_knowledge(file, &collection).await?;
+            upsert_knowledge(&qdrant_grpc_url, file, &collection).await?;
         }
-        Opt::Query {collection, question} => {
-            info!("Querying related fact from {:?}: {:?}", collection, question);
-            query(&question, &collection).await?;
+        Opt::Query {
+            collection,
+            question,
+        } => {
+            info!(
+                "Querying related fact from {:?}: {:?}",
+                collection, question
+            );
+            query(&qdrant_grpc_url, &question, &collection).await?;
         }
         Opt::Clear { collection } => {
             info!("Clearing collection: {:?}", collection);
-            clear_collection(&collection).await?;
+            clear_collection(&qdrant_grpc_url, &collection).await?;
         }
     }
     Ok(())
