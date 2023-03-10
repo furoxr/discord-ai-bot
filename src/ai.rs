@@ -20,7 +20,7 @@ fn num_tokens_from_messages(messages: &ConversationCtx, model: &str) -> Result<u
         num_tokens += 2;
     }
 
-    return Ok(num_tokens);
+    Ok(num_tokens)
 }
 
 // test mod
