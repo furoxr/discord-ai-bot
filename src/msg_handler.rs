@@ -1,13 +1,7 @@
 use std::collections::VecDeque;
 
 use anyhow::{anyhow, Result};
-use async_openai::{
-    types::{
-        ChatCompletionRequestMessage, CreateChatCompletionRequestArgs, CreateEmbeddingRequestArgs,
-        Role,
-    },
-    Client as OpenAIClient,
-};
+use async_openai::types::{ChatCompletionRequestMessage, Role};
 use log_error::LogError;
 use serenity::{
     async_trait,
@@ -17,13 +11,14 @@ use serenity::{
 use tracing::{debug, error, info, trace};
 
 use crate::{
+    ai::Openai,
     conversation::{ConversationCache, ConversationCtx},
     helper::try_log,
     knowledge_base::{KnowledgeClient, KnowledgePayload},
 };
 
 pub struct Handler {
-    pub openai_client: OpenAIClient,
+    pub openai_client: Openai,
     pub conversation_cache: ConversationCache,
     pub knowledge_client: KnowledgeClient,
 }
@@ -50,7 +45,7 @@ impl Handler {
         Knowledge: {text}
         You are a helpful assistant, and you should answer question after the 'Question'.
         And there may be related knowledge after knowledge you could refer to. ",
-        None
+            None,
         );
 
         let history: VecDeque<ChatCompletionRequestMessage> =
@@ -85,41 +80,6 @@ impl Handler {
         Ok(conversation)
     }
 
-    async fn get_chat_complete(&self, conversation: ConversationCtx) -> Result<String> {
-        let request = CreateChatCompletionRequestArgs::default()
-            .model("gpt-3.5-turbo")
-            .messages(conversation.value)
-            .build()?;
-        let mut response = self.openai_client.chat().create(request).await?;
-        if let Some(choice) = response.choices.pop() {
-            trace!("{}", &choice.message.content);
-            Ok(choice.message.content)
-        } else {
-            Err(anyhow!("No chat response from OpenAI"))
-        }
-    }
-
-    async fn get_embedding(&self, question: &str) -> Result<Vec<f32>> {
-        debug!("Get embedding for '{}'", question);
-        let request = CreateEmbeddingRequestArgs::default()
-            .model("text-embedding-ada-002")
-            .input(question)
-            .build()?;
-
-        let mut response = self.openai_client.embeddings().create(request).await?;
-
-        if let Some(data) = response.data.pop() {
-            debug!(
-                "[{}] has embedding of length {}",
-                data.index,
-                data.embedding.len()
-            );
-            Ok(data.embedding)
-        } else {
-            Err(anyhow!("No embedding response from OpenAI"))
-        }
-    }
-
     async fn _message(&self, ctx: Context, msg: Message) -> Result<()> {
         match msg.mentions_me(&ctx).await {
             Err(why) => {
@@ -144,7 +104,7 @@ impl Handler {
                     };
 
                 let mut conversation = self.build_conversation(msg.author.id)?;
-                let embedding = self.get_embedding(real_content).await?;
+                let embedding = self.openai_client.embedding(real_content).await?;
                 let conversation = match self.query_knowledge(embedding).await {
                     Ok(knowledge) => self.build_conversation_with_knowledge(
                         conversation,
@@ -157,7 +117,7 @@ impl Handler {
                     }
                 };
 
-                let response = self.get_chat_complete(conversation).await?;
+                let response = self.openai_client.chat_complete(conversation).await?;
                 let _t = typing.stop();
                 let response_sent = msg
                     .channel_id

@@ -8,7 +8,7 @@ use tracing::{error, info};
 use crate::{
     conversation::ConversationCache,
     knowledge_base::{clear_collection, query, upsert_knowledge, KnowledgeClient},
-    msg_handler::Handler,
+    msg_handler::Handler, ai::Openai,
 };
 
 #[derive(StructOpt, Debug)]
@@ -82,7 +82,7 @@ pub async fn execute() -> Result<()> {
                 | GatewayIntents::DIRECT_MESSAGES
                 | GatewayIntents::MESSAGE_CONTENT;
 
-            let openai_client = OpenAIClient::new().with_api_key(openai_api_key);
+            let openai_client = Openai::new(&openai_api_key)?;
             let conversation_cache = ConversationCache::default();
             let qdrant_client = KnowledgeClient::new(&qdrant_grpc_url).await?;
             let mut client = Client::builder(&discord_bot_token, intents)

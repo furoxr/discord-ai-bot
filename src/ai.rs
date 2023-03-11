@@ -1,10 +1,15 @@
 use std::collections::VecDeque;
 
 use anyhow::{anyhow, Result};
-use async_openai::{types::ChatCompletionRequestMessage, Client};
+use async_openai::{types::{ChatCompletionRequestMessage, CreateChatCompletionRequestArgs, CreateEmbeddingRequestArgs}, Client};
+use serenity::async_trait;
 use tiktoken_rs::tiktoken::{cl100k_base, CoreBPE};
+use tracing::{trace, debug};
 
 use crate::conversation::ConversationCtx;
+
+static GPT_MODEL: &'static str = "gpt-3.5-turbo";
+static EMBEDDING_MODEL: &'static str = "text-embedding-ada-002";
 
 /// Calculate tokens consumed in the chat api of openai. Check the calculation algorithm here:
 /// https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
@@ -111,10 +116,41 @@ impl Openai {
         }
 
         Ok(ctx)
+    } 
+}
+
+impl Openai {
+    pub async fn chat_complete(&self, conversation: ConversationCtx) -> Result<String> {
+        let request = CreateChatCompletionRequestArgs::default()
+            .model(GPT_MODEL)
+            .messages(conversation.value)
+            .build()?;
+        let mut response = self.0.chat().create(request).await?;
+        if let Some(choice) = response.choices.pop() {
+            trace!("{}", &choice.message.content);
+            Ok(choice.message.content)
+        } else {
+            Err(anyhow!("No chat response from OpenAI"))
+        }
+    }
+
+    pub async fn embedding(&self, text: &str) -> Result<Vec<f32>> {
+        trace!("Get embedding for '{}'", text);
+        let request = CreateEmbeddingRequestArgs::default()
+            .model(EMBEDDING_MODEL)
+            .input(text)
+            .build()?;
+
+        let mut response = self.0.embeddings().create(request).await?;
+
+        if let Some(data) = response.data.pop() {
+            Ok(data.embedding)
+        } else {
+            Err(anyhow!("No embedding response from OpenAI"))
+        }
     }
 }
 
-// test mod
 #[cfg(test)]
 mod tests {
     use super::Openai;
