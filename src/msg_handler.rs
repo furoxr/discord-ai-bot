@@ -21,6 +21,7 @@ pub struct Handler {
     pub openai_client: Openai,
     pub conversation_cache: ConversationCache,
     pub knowledge_client: KnowledgeClient,
+    pub collection_name: String,
 }
 
 #[async_trait]
@@ -73,7 +74,7 @@ impl Handler {
     pub async fn query_knowledge(&self, embedding: Vec<f32>) -> Result<KnowledgePayload> {
         let mut response = self
             .knowledge_client
-            .query_knowledge("darwinia", embedding, Some(0.78))
+            .query_knowledge(&self.collection_name, embedding, Some(0.78))
             .await?;
         response.reverse();
 

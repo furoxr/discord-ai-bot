@@ -38,7 +38,8 @@ docker run -p 6333:6333 -p 6334:6334 \
 ```
 export OPENAI_API_KEY=YOUR_OPENAI_API_KEY
 export DISCORD_TOKEN=YOUR_DISCORD_BOT_TOKEN
-./discord-ai-bot start
+./discord-ai-bot start COLLECTION_NAME
+`COLLECTION_NAME` is the collection name of the qdrant database, where your knowledge store.
 ```
 ### How to Update knowledge into qdrant database
 ```
@@ -46,7 +47,7 @@ export OPENAI_API_KEY=YOUR_OPENAI_API_KEY
 export DISCORD_TOKEN=YOUR_DISCORD_BOT_TOKEN
 ./discord-ai-bot update COLLECTION_NAME DATA_FILE_PATH
 ```
-`COLLECTION_NAME` is the collection name of the qdrant database, which you will upsert knowledge into.
+`COLLECTION_NAME` is the collection name of the qdrant database, where you will upsert knowledge into.
 `DATA_FILE_PATH` is the JSON file containing your knowledge, and the format of json file should be like:
 ```
 {

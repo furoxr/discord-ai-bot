@@ -5,9 +5,10 @@ use structopt::StructOpt;
 use tracing::{error, info};
 
 use crate::{
+    ai::Openai,
     conversation::ConversationCache,
     knowledge_base::{clear_collection, query, upsert_knowledge, KnowledgeClient},
-    msg_handler::Handler, ai::Openai,
+    msg_handler::Handler,
 };
 
 #[derive(StructOpt, Debug)]
@@ -39,6 +40,8 @@ pub enum Opt {
         /// Discord bot token
         #[structopt(name = "discord-bot-token", env = "DISCORD_TOKEN")]
         discord_bot_token: String,
+        #[structopt(name = "collection-name")]
+        collection_name: String,
     },
 
     /// Upsert knowledge into a knowledge base
@@ -75,7 +78,10 @@ pub async fn execute() -> Result<()> {
     } = DiscordAiBot::from_args();
 
     match cmd {
-        Opt::Start { discord_bot_token } => {
+        Opt::Start {
+            discord_bot_token,
+            collection_name,
+        } => {
             // Set gateway intents, which decides what events the bot will be notified about
             let intents = GatewayIntents::GUILD_MESSAGES
                 | GatewayIntents::DIRECT_MESSAGES
@@ -89,6 +95,7 @@ pub async fn execute() -> Result<()> {
                     openai_client,
                     conversation_cache,
                     knowledge_client: qdrant_client,
+                    collection_name,
                 })
                 .await
                 .expect("Err creating discord bot client");
