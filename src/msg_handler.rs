@@ -23,6 +23,22 @@ pub struct Handler {
     pub knowledge_client: KnowledgeClient,
 }
 
+#[async_trait]
+impl EventHandler for Handler {
+    // Set a handler for the `message` event - so that whenever a new message
+    // is received - the closure (or function) passed will be called.
+    //
+    // Event handlers are dispatched through a threadpool, and so multiple
+    // events can be dispatched simultaneously.
+    async fn message(&self, ctx: Context, msg: Message) {
+        try_log!(self._message(ctx, msg).await)
+    }
+
+    async fn ready(&self, _: Context, ready: Ready) {
+        info!("{} is connected!", ready.user.name);
+    }
+}
+
 impl Handler {
     fn extract_legal_content(bot_user_id: UserId, msg: &Message) -> Option<&str> {
         let mention_part = String::from("<@") + &bot_user_id.0.to_string() + ">";
@@ -96,6 +112,7 @@ impl Handler {
                     &msg.author.name, &msg.content
                 );
 
+                // Extract question from message
                 let typing = msg.channel_id.start_typing(&ctx.http)?;
                 let real_content =
                     match Self::extract_legal_content(ctx.cache.current_user_id(), &msg) {
@@ -103,6 +120,7 @@ impl Handler {
                         None => return Ok(()),
                     };
 
+                // Build conversation with atuhor id, and find related knowledge
                 let mut conversation = self.build_conversation(msg.author.id)?;
                 let embedding = self.openai_client.embedding(real_content).await?;
                 let mut conversation = match self.query_knowledge(embedding).await {
@@ -117,6 +135,7 @@ impl Handler {
                     }
                 };
 
+                // Pruning old message in conversation if it's exceed the limit of token of openai api
                 if let Err(why) = self
                     .openai_client
                     .shrink_conversation(&mut conversation, CHAT_GPT_LIMIT)
@@ -133,12 +152,14 @@ impl Handler {
                     return Ok(());
                 }
 
+                // Get response from gpt-3.5
                 let response = self.openai_client.chat_complete(conversation).await?;
                 let response_sent = msg
                     .channel_id
                     .send_message(&ctx.http, |m| m.content(response).reference_message(&msg))
                     .await?;
 
+                // Cache conversation
                 vec![(Role::User, msg.clone()), (Role::Assistant, response_sent)]
                     .into_iter()
                     .for_each(|x| {
@@ -149,21 +170,5 @@ impl Handler {
                 Ok(())
             }
         }
-    }
-}
-
-#[async_trait]
-impl EventHandler for Handler {
-    // Set a handler for the `message` event - so that whenever a new message
-    // is received - the closure (or function) passed will be called.
-    //
-    // Event handlers are dispatched through a threadpool, and so multiple
-    // events can be dispatched simultaneously.
-    async fn message(&self, ctx: Context, msg: Message) {
-        try_log!(self._message(ctx, msg).await)
-    }
-
-    async fn ready(&self, _: Context, ready: Ready) {
-        info!("{} is connected!", ready.user.name);
     }
 }
