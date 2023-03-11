@@ -1,15 +1,19 @@
 use std::collections::VecDeque;
 
 use anyhow::{anyhow, Result};
-use async_openai::{types::{ChatCompletionRequestMessage, CreateChatCompletionRequestArgs, CreateEmbeddingRequestArgs}, Client};
-use serenity::async_trait;
+use async_openai::{
+    types::{
+        ChatCompletionRequestMessage, CreateChatCompletionRequestArgs, CreateEmbeddingRequestArgs,
+    },
+    Client,
+};
 use tiktoken_rs::tiktoken::{cl100k_base, CoreBPE};
-use tracing::{trace, debug};
+use tracing::trace;
 
 use crate::conversation::ConversationCtx;
 
-static GPT_MODEL: &'static str = "gpt-3.5-turbo";
-static EMBEDDING_MODEL: &'static str = "text-embedding-ada-002";
+static GPT_MODEL: &str = "gpt-3.5-turbo";
+static EMBEDDING_MODEL: &str = "text-embedding-ada-002";
 
 /// Calculate tokens consumed in the chat api of openai. Check the calculation algorithm here:
 /// https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
@@ -116,7 +120,7 @@ impl Openai {
         }
 
         Ok(ctx)
-    } 
+    }
 }
 
 impl Openai {

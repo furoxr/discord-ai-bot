@@ -1,5 +1,4 @@
 use anyhow::Result;
-use async_openai::Client as OpenAIClient;
 use serenity::{prelude::GatewayIntents, Client};
 use std::path::PathBuf;
 use structopt::StructOpt;
