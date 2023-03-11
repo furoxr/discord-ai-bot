@@ -8,10 +8,10 @@ use serenity::{
     model::{channel::Message, gateway::Ready, prelude::UserId},
     prelude::*,
 };
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    ai::Openai,
+    ai::{Openai, CHAT_GPT_LIMIT},
     conversation::{ConversationCache, ConversationCtx},
     helper::try_log,
     knowledge_base::{KnowledgeClient, KnowledgePayload},
@@ -105,7 +105,7 @@ impl Handler {
 
                 let mut conversation = self.build_conversation(msg.author.id)?;
                 let embedding = self.openai_client.embedding(real_content).await?;
-                let conversation = match self.query_knowledge(embedding).await {
+                let mut conversation = match self.query_knowledge(embedding).await {
                     Ok(knowledge) => self.build_conversation_with_knowledge(
                         conversation,
                         knowledge,
@@ -117,8 +117,23 @@ impl Handler {
                     }
                 };
 
+                if let Err(why) = self
+                    .openai_client
+                    .shrink_conversation(&mut conversation, CHAT_GPT_LIMIT)
+                {
+                    warn!(
+                        "Shrink conversation failed: {:?}, content: {}",
+                        why, real_content
+                    );
+                    let _t = typing.stop();
+                    msg.channel_id
+                        .send_message(&ctx.http, |m| m.content("I apologize, but could you please provide a shorter question? It would be easier for me to assist you if the question is more concise. Thank you!").reference_message(&msg))
+                        .await?;
+
+                    return Ok(());
+                }
+
                 let response = self.openai_client.chat_complete(conversation).await?;
-                let _t = typing.stop();
                 let response_sent = msg
                     .channel_id
                     .send_message(&ctx.http, |m| m.content(response).reference_message(&msg))

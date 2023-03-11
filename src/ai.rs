@@ -12,8 +12,9 @@ use tracing::trace;
 
 use crate::conversation::ConversationCtx;
 
-static GPT_MODEL: &str = "gpt-3.5-turbo";
-static EMBEDDING_MODEL: &str = "text-embedding-ada-002";
+pub static GPT_MODEL: &str = "gpt-3.5-turbo";
+pub static EMBEDDING_MODEL: &str = "text-embedding-ada-002";
+pub static CHAT_GPT_LIMIT: usize = 4096;
 
 /// Calculate tokens consumed in the chat api of openai. Check the calculation algorithm here:
 /// https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
