@@ -1,7 +1,7 @@
 use std::{
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{Mutex, MutexGuard, PoisonError}, collections::VecDeque,
 };
 
 use async_openai::{
@@ -91,17 +91,17 @@ impl TryFrom<ConversationMessage> for ChatCompletionRequestMessage {
 
 #[derive(Debug, Clone, Default)]
 pub struct ConversationCtx {
-    pub value: Vec<ChatCompletionRequestMessage>,
+    pub value: VecDeque<ChatCompletionRequestMessage>,
 }
 
-impl From<ConversationCtx> for Vec<ChatCompletionRequestMessage> {
+impl From<ConversationCtx> for VecDeque<ChatCompletionRequestMessage> {
     fn from(ctx: ConversationCtx) -> Self {
         ctx.value
     }
 }
 
 impl Deref for ConversationCtx {
-    type Target = Vec<ChatCompletionRequestMessage>;
+    type Target = VecDeque<ChatCompletionRequestMessage>;
 
     fn deref(&self) -> &Self::Target {
         &self.value
@@ -137,8 +137,7 @@ impl ConversationCtx {
             arg = arg.name(name);
         }
         let message = arg.build().expect("Unreachable!");
-        dbg!(&message);
-        self.value.push(message);
+        self.value.push_back(message);
         self
     }
 }

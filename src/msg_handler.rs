@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use anyhow::{anyhow, Result};
 use async_openai::{
     types::{
@@ -51,7 +53,7 @@ impl Handler {
         None
         );
 
-        let history: Vec<ChatCompletionRequestMessage> =
+        let history: VecDeque<ChatCompletionRequestMessage> =
             self.conversation_cache.get_messages(user_id)?.into();
         conversation.extend(history);
         Ok(conversation)
